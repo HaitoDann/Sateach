@@ -1,0 +1,62 @@
+import { describe, expect, it } from "vitest";
+import { fmtDuration, fmtHours, fmtTime, parseDuration, parseTime, stepSchoolDay, toDateKey } from "./time";
+import { computeVolumes } from "./domains";
+
+describe("time helpers", () => {
+  it("formats and parses clock times", () => {
+    expect(fmtTime(510)).toBe("08:30");
+    expect(parseTime("8h30")).toBe(510);
+    expect(parseTime("13:05")).toBe(785);
+    expect(parseTime("nope")).toBeNull();
+  });
+
+  it("formats durations the French way", () => {
+    expect(fmtDuration(90)).toBe("1h30");
+    expect(fmtDuration(120)).toBe("2h");
+    expect(fmtDuration(45)).toBe("45 min");
+    expect(fmtHours(45)).toBe("0h45");
+    expect(fmtHours(-90)).toBe("−1h30");
+  });
+
+  it("parses lenient duration inputs", () => {
+    expect(parseDuration("5h")).toBe(300);
+    expect(parseDuration("5h30")).toBe(330);
+    expect(parseDuration("1:30")).toBe(90);
+    expect(parseDuration("90min")).toBe(90);
+    expect(parseDuration("1,5")).toBe(90);
+    expect(parseDuration("10")).toBe(600);
+    expect(parseDuration("abc")).toBeNull();
+  });
+
+  it("skips non-school days", () => {
+    // Friday 2026-10-02 → next school day is Monday 2026-10-05 (Mon/Tue/Thu/Fri week).
+    expect(toDateKey(stepSchoolDay(new Date(2026, 9, 2), 1, [0, 1, 3, 4]))).toBe("2026-10-05");
+    // Tuesday → Thursday (no Wednesday).
+    expect(toDateKey(stepSchoolDay(new Date(2026, 8, 29), 1, [0, 1, 3, 4]))).toBe("2026-10-01");
+  });
+});
+
+describe("computeVolumes", () => {
+  const domains = [
+    { id: "m", name: "Mathématiques", color: "#000", position: 0, target_minutes: 300 },
+    { id: "f", name: "Français", color: "#000", position: 1, target_minutes: 600 },
+    { id: "e", name: "EMC", color: "#000", position: 2, target_minutes: 0 },
+  ];
+  it("sums slots on active days only and flags gaps", () => {
+    const slots = [
+      { id: "1", day: 0, start_min: 510, end_min: 600, domain_id: "m", title: "" },
+      { id: "2", day: 1, start_min: 510, end_min: 720, domain_id: "m", title: "" },
+      { id: "3", day: 2, start_min: 510, end_min: 600, domain_id: "m", title: "" }, // Wednesday, inactive
+      { id: "4", day: 0, start_min: 600, end_min: 1200, domain_id: "f", title: "" },
+      { id: "5", day: 0, start_min: 600, end_min: 620, domain_id: null, title: "Récré" },
+    ];
+    const v = computeVolumes(domains, slots, [0, 1, 3, 4]);
+    expect(v.map((x) => [x.domain.id, x.planned, x.status])).toEqual([
+      ["m", 300, "ok"],
+      ["f", 600, "ok"],
+      ["e", 0, "none"],
+    ]);
+    const under = computeVolumes(domains, slots.slice(0, 1), [0]);
+    expect(under[0]).toMatchObject({ planned: 90, delta: -210, status: "under" });
+  });
+});

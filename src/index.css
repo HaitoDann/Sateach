@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Sat'each ─────────────────────────────────────────────────────────────────
+   Same structure as Nilo, re-tinted around the Sat'each teal (#00CEC8).
+   Light: soft paper with a barely-there cool cast. Dark: deep teal-charcoal.
+   The teal stays an accent — the canvas remains quiet so the subject
+   (domaine) colors carry the information. */
+
+:root {
+  --background: #f6f8f8;
+  --card: #ffffff;
+  --foreground: #172221;
+  --muted: #ecf1f1;
+  --muted-foreground: #56625f;
+  --border: #dde6e5;
+  --input: #d3dddc;
+  --primary: #00cec8;
+  --primary-foreground: #04302e;
+  --secondary: #ecf1f1;
+  --secondary-foreground: #172221;
+  --accent: #e1f7f6;
+  --accent-foreground: #0a4a48;
+  --destructive: #d23b3b;
+  --destructive-foreground: #ffffff;
+  --ring: #00cec8;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: #131a1a;
+  --card: #182120;
+  --foreground: #e3ebea;
+  --muted: #1c2626;
+  --muted-foreground: #93a4a2;
+  --border: #293736;
+  --input: #324342;
+  --primary: #2fd9d3;
+  --primary-foreground: #03201f;
+  --secondary: #1c2626;
+  --secondary-foreground: #e3ebea;
+  --accent: #163130;
+  --accent-foreground: #c6f4f2;
+  --destructive: #f07171;
+  --destructive-foreground: #131a1a;
+  --ring: #2fd9d3;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: "Onest Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.dark input[type="date"]::-webkit-calendar-picker-indicator,
+.dark input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+/* Minimal scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Auto-growing textareas in the cahier journal keep their scrollbar hidden. */
+textarea.autogrow {
+  resize: none;
+  overflow: hidden;
+}
+
+/* ── Impression (cahier journal) ─────────────────────────────────────────────
+   The printable sheet is rendered in a portal (.print-root) next to #root:
+   hidden on screen, it is the only thing shown on paper. */
+.print-root {
+  display: none;
+}
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+  #root {
+    display: none !important;
+  }
+  .print-root {
+    display: block;
+  }
+  .print-break-avoid {
+    break-inside: avoid;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
