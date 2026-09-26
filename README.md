@@ -14,6 +14,20 @@ sur la même base que Nilo : même ergonomie, mêmes composants, même système 
   (Mathématiques) qui lui donne sa couleur. Une même séance peut être créée sur
   plusieurs jours en une fois. Les temps « hors domaine » (récréation, cantine,
   accueil…) sont affichés hachurés et ne sont pas comptés.
+- **Pastilles de domaine** — au-dessus de la grille, glissez une pastille
+  (Mathématiques, Français…, ou « Pause ») dans l'emploi du temps pour créer la
+  séance instantanément (durée 30 min / 45 min / 1 h au choix).
+- **Trait de l'heure actuelle** — une ligne suit la journée dans l'emploi du
+  temps ; la séance en cours est encadrée, et marquée « en cours » dans le
+  cahier journal.
+- **Calendrier** — réunions, vacances, évènements, sur un mois, avec la liste
+  « À venir ». Chaque évènement peut avoir un rappel (au début, 15 min, 1 h, la
+  veille, une semaine avant) ; les rappels s'activent ou se désactivent d'un clic
+  (notifications système, tant que Sat'each est ouvert).
+- **Mes cours** — l'archive des cours, rangée par domaine puis par séquence :
+  objectifs, déroulement, matériel, notes, niveau, et documents joints (copiés
+  dans le dossier `Cours/` du vault). Une séance détaillée du cahier journal
+  s'archive en un clic.
 - **Domaines** — Français, Mathématiques, Questionner le monde, EPS, Arts
   plastiques, Musique, EMC, Anglais, chacun avec sa couleur. Nom et couleur
   modifiables, domaines ajoutables dans les Réglages.
@@ -27,6 +41,7 @@ sur la même base que Nilo : même ergonomie, mêmes composants, même système 
   séance comme faite, l'annuler pour ce jour (sortie, absence…), modifier son
   horaire pour ce jour uniquement, ajouter une séance ponctuelle, écrire les notes
   du jour, et **imprimer** la journée (A4). Enregistrement automatique.
+  Chaque séance se valide « Faite » ou « Non faite ».
 
 ## Le vault
 
@@ -72,6 +87,6 @@ src/
                 domains.ts (domaines, volumes), time.ts, vault.ts (verrou, sauvegardes), store.ts (préférences)
   context/      VaultContext : domaines, séances, réglages, toasts, confirmations
   components/   Sidebar (rail d'icônes façon Nilo), WeekGrid, SessionDialog, journal/…
-  pages/        TimetablePage, JournalPage, VolumesPage, SettingsPage, VaultSelector
+  pages/        TimetablePage, JournalPage, CalendarPage, ArchivePage, VolumesPage, SettingsPage, VaultSelector
 src-tauri/      application Tauri (fenêtre sans bordure, verrou + sauvegardes en Rust)
 ```

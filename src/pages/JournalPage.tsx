@@ -7,13 +7,15 @@ import SessionDialog, { type SessionValues } from "../components/SessionDialog";
 import { Button } from "../components/ui/Button";
 import { useVault } from "../context/VaultContext";
 import {
-  createOneOffSession, deleteJournalEntry, getDatesWithContent, getJournalDay, saveDayNotes, saveSessionFields,
+  createOneOffSession, deleteJournalEntry, getEvents, saveArchiveItem, getDatesWithContent, getJournalDay, saveDayNotes, saveSessionFields,
 } from "../lib/db";
 import {
   DAY_SHORT, addDays, fmtDuration, fmtLongDate, fmtTime, fromDateKey, stepSchoolDay, toDateKey, weekdayIndex,
 } from "../lib/time";
-import type { DaySession, EntryFields, PageName } from "../lib/types";
+import type { CalendarEvent, DaySession, EntryFields, PageName } from "../lib/types";
 import { cn } from "../lib/utils";
+import { useNow } from "../lib/useNow";
+import { EVENT_KINDS, fmtEventTime } from "../lib/events";
 
 /** Remembered while the app is open, so switching views keeps the same day. */
 let rememberedDate: string | null = null;
@@ -34,11 +36,14 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<{ kind: "new" } | { kind: "edit"; session: DaySession } | null>(null);
   const [withContent, setWithContent] = useState<Set<string>>(new Set());
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const d = fromDateKey(date);
   const dateLabel = fmtLongDate(d);
-  const isToday = date === toDateKey(new Date());
+  const now = useNow();
+  const isToday = date === toDateKey(now);
+  const nowMin = now.getHours() * 60 + now.getMinutes();
   const isSchoolDay = week.days.includes(weekdayIndex(d));
 
   // Week strip: the school days of the displayed week.
@@ -47,7 +52,8 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
   const weekKey = toDateKey(monday);
 
   const load = useCallback(async () => {
-    const day = await getJournalDay(date, slots);
+    const [day, evs] = await Promise.all([getJournalDay(date, slots), getEvents(date, date)]);
+    setEvents(evs);
     setSessions(day.sessions);
     setNotes(day.notes);
     setLoadedDate(date);
@@ -140,6 +146,17 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
     void refreshWeekDots();
   }
 
+  async function archiveSession(s: DaySession) {
+    window.dispatchEvent(new Event(FLUSH_EVENT));
+    await new Promise((r) => setTimeout(r, 120));
+    const fresh = (await getJournalDay(date, slots)).sessions.find((x) => x.key === s.key) ?? s;
+    await saveArchiveItem({
+      domain_id: fresh.domain_id, folder: "", title: fresh.title || domainById.get(fresh.domain_id ?? "")?.name || "Séance",
+      level: "", objectives: fresh.objectives, progression: fresh.progression, materials: fresh.materials, notes: fresh.review,
+    });
+    toast("Séance archivée dans « Mes cours »");
+  }
+
   function print() {
     window.dispatchEvent(new Event(FLUSH_EVENT));
     flushNotes();
@@ -160,7 +177,8 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
     return [...m.entries()].map(([id, min]) => ({ domain: domainById.get(id)!, min })).sort((a, b) => b.min - a.min);
   }, [visible, domainById]);
   const dayTotal = dayVolumes.reduce((a, v) => a + v.min, 0);
-  const doneCount = lessons.filter((s) => s.done).length;
+  const doneCount = lessons.filter((s) => s.done === 1).length;
+  const notDoneCount = lessons.filter((s) => s.done === 2).length;
 
   function toggle(key: string) {
     setExpanded((cur) => {
@@ -210,7 +228,7 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   {lessons.length === 0
                     ? isSchoolDay ? "Aucune séance prévue" : "Pas de classe ce jour-là"
-                    : `${lessons.length} séance${lessons.length > 1 ? "s" : ""} · ${fmtDuration(dayTotal)}${doneCount ? ` · ${doneCount} faite${doneCount > 1 ? "s" : ""}` : ""}`}
+                    : `${lessons.length} séance${lessons.length > 1 ? "s" : ""} · ${fmtDuration(dayTotal)}${doneCount ? ` · ${doneCount} faite${doneCount > 1 ? "s" : ""}` : ""}${notDoneCount ? ` · ${notDoneCount} non faite${notDoneCount > 1 ? "s" : ""}` : ""}`}
                 </p>
               </div>
               {lessons.length > 0 && (
@@ -235,7 +253,9 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
                     expanded={expanded.has(s.key)}
                     onToggle={() => toggle(s.key)}
                     onSaveText={(patch) => patchSession(s, patch, false)}
-                    onToggleDone={() => patchSession(s, { done: s.done ? 0 : 1 })}
+                    onSetDone={(v) => patchSession(s, { done: v })}
+                    onArchive={() => void archiveSession(s)}
+                    live={isToday && s.start_min <= nowMin && nowMin < s.end_min}
                     onHide={() => s.oneOff ? removeOneOff(s) : patchSession(s, { hidden: 1 })}
                     onEditTime={() => setDialog({ kind: "edit", session: s })}
                     onDelete={s.oneOff ? () => removeOneOff(s) : undefined}
@@ -297,7 +317,7 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
               {weekDates.map((wd) => {
                 const k = toDateKey(wd);
                 const selected = k === date;
-                const today = k === toDateKey(new Date());
+                const today = k === toDateKey(now);
                 return (
                   <button
                     key={k}
@@ -315,6 +335,27 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
               })}
             </div>
           </section>
+
+          {events.length > 0 && (
+            <section>
+              <h3 className="mb-2 text-xs font-medium text-muted-foreground">Agenda</h3>
+              <div className="space-y-1.5">
+                {events.map((e) => (
+                  <button
+                    key={e.id}
+                    onClick={() => onNavigate("calendar")}
+                    className="flex w-full items-start gap-2 rounded-lg border border-border bg-card px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: EVENT_KINDS[e.kind].color }} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-foreground">{e.title}</span>
+                      <span className="block text-xs text-muted-foreground">{EVENT_KINDS[e.kind].label} · {fmtEventTime(e)}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section>
             <h3 className="mb-2 text-xs font-medium text-muted-foreground">Notes du jour</h3>

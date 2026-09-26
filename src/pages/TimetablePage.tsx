@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { Plus, MousePointerClick } from "lucide-react";
+import { Plus, MousePointerClick, GripVertical } from "lucide-react";
+import { SegmentedControl } from "../components/ui/SegmentedControl";
 import PageHeader from "../components/PageHeader";
-import WeekGrid from "../components/timetable/WeekGrid";
+import WeekGrid, { pastilleDrag } from "../components/timetable/WeekGrid";
+import { withAlpha } from "../lib/utils";
 import SessionDialog, { type SessionValues } from "../components/SessionDialog";
 import { Button } from "../components/ui/Button";
 import { useVault } from "../context/VaultContext";
@@ -16,6 +18,7 @@ export default function TimetablePage() {
   const { domains, domainById, slots, week, reload, toast, confirm } = useVault();
   const [editing, setEditing] = useState<Editing | null>(null);
   const [lastDomain, setLastDomain] = useState<string | null>(null);
+  const [dropDuration, setDropDuration] = useState(45);
 
   const volumes = computeVolumes(domains, slots, week.days);
   const total = volumes.reduce((a, v) => a + v.planned, 0);
@@ -59,6 +62,12 @@ export default function TimetablePage() {
     await reload();
   }
 
+  async function dropDomain(domainId: string | null, day: number, start: number, end: number) {
+    await createSlot({ day, start_min: start, end_min: end, domain_id: domainId, title: domainId ? "" : "Récréation" });
+    setLastDomain(domainId);
+    await reload();
+  }
+
   async function move(id: string, patch: Pick<Slot, "day" | "start_min" | "end_min">) {
     await updateSlot(id, patch);
     await reload();
@@ -73,15 +82,21 @@ export default function TimetablePage() {
         </Button>
       </PageHeader>
 
-      {/* Legend: every domain with its weekly hours */}
-      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 px-6 py-3">
+      {/* Pastilles: drag one onto the grid to create a séance instantly */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-6 py-3">
         {volumes.map(({ domain, planned }) => (
-          <div key={domain.id} className="flex items-center gap-1.5 text-xs">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: domain.color }} />
-            <span className="text-foreground">{domain.name}</span>
-            <span className="tabular-nums text-muted-foreground">{planned ? fmtDuration(planned) : "—"}</span>
-          </div>
+          <Pastille key={domain.id} domainId={domain.id} duration={dropDuration} label={domain.name} color={domain.color} hint={planned ? fmtDuration(planned) : "—"} />
         ))}
+        <Pastille domainId={null} duration={Math.min(dropDuration, 15)} label="Pause" hint="hors domaine" />
+        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          <GripVertical size={13} className="opacity-60" />
+          Glissez une pastille dans la grille · durée
+          <SegmentedControl
+            options={[30, 45, 60].map((m) => ({ value: String(m), label: fmtDuration(m) }))}
+            value={String(dropDuration)}
+            onChange={(v) => setDropDuration(Number(v))}
+          />
+        </div>
       </div>
 
       <div className="relative min-h-0 flex-1 px-6 pb-6">
@@ -99,13 +114,14 @@ export default function TimetablePage() {
             onCreate={openNew}
             onEdit={(slot) => setEditing({ kind: "edit", slot })}
             onChange={move}
+            onDropDomain={dropDomain}
           />
         )}
         {visibleSlots.length === 0 && week.days.length > 0 && (
           <div className="pointer-events-none absolute inset-x-6 top-1/2 flex -translate-y-1/2 justify-center">
             <div className="flex items-center gap-2 rounded-full border border-border bg-card/95 px-4 py-2 text-sm text-muted-foreground shadow-sm">
               <MousePointerClick size={15} className="text-brand-600" />
-              Cliquez ou glissez dans la grille pour placer votre première séance
+              Glissez une pastille de domaine dans la grille, ou cliquez-glissez pour créer une séance
             </div>
           </div>
         )}
@@ -125,6 +141,32 @@ export default function TimetablePage() {
           onClose={() => setEditing(null)}
         />
       )}
+    </div>
+  );
+}
+
+function Pastille({ domainId, duration, label, color, hint }: { domainId: string | null; duration: number; label: string; color?: string; hint: string }) {
+  return (
+    <div
+      draggable
+      onDragStart={(e) => {
+        pastilleDrag.domainId = domainId;
+        pastilleDrag.duration = duration;
+        e.dataTransfer.effectAllowed = "copy";
+        e.dataTransfer.setData("text/plain", label);
+      }}
+      onDragEnd={() => { pastilleDrag.domainId = undefined; }}
+      title={`Glisser dans l'emploi du temps pour créer une séance de ${label}`}
+      className="flex cursor-grab select-none items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-transform duration-150 ease-aqua hover:-translate-y-0.5 hover:shadow-sm active:cursor-grabbing"
+      style={
+        color
+          ? { backgroundColor: withAlpha(color, 0.12), borderColor: withAlpha(color, 0.35) }
+          : { borderStyle: "dashed", borderColor: "var(--border)" }
+      }
+    >
+      <span className="h-2.5 w-2.5 rounded-full" style={color ? { backgroundColor: color } : { border: "1px solid var(--muted-foreground)" }} />
+      <span className="font-medium text-foreground">{label}</span>
+      <span className="tabular-nums text-muted-foreground">{hint}</span>
     </div>
   );
 }

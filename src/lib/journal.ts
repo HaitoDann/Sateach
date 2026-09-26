@@ -38,7 +38,7 @@ export function mergeDay(date: string, weekday: number, slots: Slot[], entries: 
       materials: e?.materials ?? "",
       review: e?.review ?? "",
       hidden: !!e?.hidden,
-      done: !!e?.done,
+      done: Number(e?.done ?? 0),
     });
   }
 
@@ -63,7 +63,7 @@ export function mergeDay(date: string, weekday: number, slots: Slot[], entries: 
       materials: e.materials,
       review: e.review,
       hidden: !!e.hidden,
-      done: !!e.done,
+      done: Number(e.done),
     });
   }
 

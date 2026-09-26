@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Domain, Slot } from "../../lib/types";
-import { DAY_NAMES, fmtDuration, fmtTime, snap } from "../../lib/time";
+import { DAY_NAMES, fmtDuration, fmtTime, snap, weekdayIndex } from "../../lib/time";
+import { useNow } from "../../lib/useNow";
 import { cn, withAlpha } from "../../lib/utils";
 
 const SNAP = 5;           // minutes
@@ -52,9 +53,19 @@ interface Props {
   onCreate: (day: number, start: number, end: number) => void;
   onEdit: (slot: Slot) => void;
   onChange: (id: string, patch: Pick<Slot, "day" | "start_min" | "end_min">) => void;
+  /** A domain pastille (or the "pause" one, null) dropped on the grid. */
+  onDropDomain: (domainId: string | null, day: number, start: number, end: number) => void;
 }
 
-export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, onCreate, onEdit, onChange }: Props) {
+/** Set by the legend pastilles while they are dragged (dataTransfer can't be
+ *  read during dragover). `undefined` = nothing being dragged. */
+export const pastilleDrag: { domainId: string | null | undefined; duration: number } = { domainId: undefined, duration: 45 };
+
+export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, onCreate, onEdit, onChange, onDropDomain }: Props) {
+  const now = useNow();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const todayDay = weekdayIndex(now);
+  const [dropPreview, setDropPreview] = useState<{ day: number; start: number; end: number; color?: string } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const colsRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragOp | null>(null);
@@ -174,6 +185,31 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
     }
   }
 
+  function dropRange(e: React.DragEvent): { start: number; end: number } {
+    const dur = pastilleDrag.duration;
+    const start = Math.max(dayStart, Math.min(dayEnd - dur, snap(minAt(e.clientY) - dur / 2, SNAP)));
+    return { start, end: Math.min(dayEnd, start + dur) };
+  }
+
+  function onDragOver(e: React.DragEvent, day: number) {
+    if (pastilleDrag.domainId === undefined) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    const r = dropRange(e);
+    const color = pastilleDrag.domainId ? domainById.get(pastilleDrag.domainId)?.color : undefined;
+    if (!dropPreview || dropPreview.day !== day || dropPreview.start !== r.start) setDropPreview({ day, ...r, color });
+  }
+
+  function onDrop(e: React.DragEvent, day: number) {
+    if (pastilleDrag.domainId === undefined) return;
+    e.preventDefault();
+    const r = dropRange(e);
+    setDropPreview(null);
+    onDropDomain(pastilleDrag.domainId, day, r.start, r.end);
+  }
+
+  const showNow = nowMin >= dayStart && nowMin <= dayEnd && days.includes(todayDay);
+
   const colBorder = "border-l border-black/[0.05] dark:border-white/[0.06] first:border-l-0";
 
   return (
@@ -208,11 +244,22 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
             ))}
           </div>
 
+          {showNow && (
+            <div
+              className="pointer-events-none absolute left-1 z-20 -translate-y-1/2 rounded bg-primary px-1 text-[10px] font-semibold tabular-nums text-primary-foreground"
+              style={{ top: y(nowMin) + 4 }}
+            >
+              {fmtTime(nowMin)}
+            </div>
+          )}
           <div ref={colsRef} className="relative mt-1 flex flex-1" style={{ height: total }}>
             {days.map((d, di) => (
               <div
                 key={d}
                 onPointerDown={(e) => beginCreate(e, d)}
+                onDragOver={(e) => onDragOver(e, d)}
+                onDragLeave={(e) => { if (e.currentTarget === e.target) setDropPreview(null); }}
+                onDrop={(e) => onDrop(e, d)}
                 className={cn("relative min-w-0 flex-1 cursor-crosshair", colBorder)}
               >
                 {hours.map((m) => (
@@ -239,6 +286,7 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
                       lane={dr ? 0 : lane}
                       lanes={dr ? 1 : lanes}
                       dragging={!!dr}
+                      live={d === todayDay && slot.start_min <= nowMin && nowMin < slot.end_min}
                       onPointerDown={(e) => beginMove(e, slot)}
                       onResizeDown={(e) => beginResize(e, slot)}
                     />
@@ -260,6 +308,33 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
                   );
                 })()}
 
+                {dropPreview && dropPreview.day === d && (
+                  <div
+                    className="pointer-events-none absolute inset-x-1 z-30 rounded-lg border-2 border-dashed px-1.5 py-0.5 text-[11px] font-medium text-foreground"
+                    style={{
+                      top: y(dropPreview.start), height: (dropPreview.end - dropPreview.start) * ppm,
+                      borderColor: dropPreview.color ?? "var(--muted-foreground)",
+                      backgroundColor: dropPreview.color ? withAlpha(dropPreview.color, 0.14) : "var(--muted)",
+                    }}
+                  >
+                    {fmtTime(dropPreview.start)} – {fmtTime(dropPreview.end)}
+                  </div>
+                )}
+
+                {/* Now line: follows the day, strong on today's column */}
+                {showNow && (
+                  <div className="pointer-events-none absolute inset-x-0 z-20" style={{ top: y(nowMin) }}>
+                    {d === todayDay ? (
+                      <>
+                        <div className="h-0.5 bg-primary shadow-[0_0_6px_var(--primary)]" />
+                        <div className="absolute -left-1 -top-[4px] h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card" />
+                      </>
+                    ) : (
+                      <div className="border-t border-dashed border-primary/40" />
+                    )}
+                  </div>
+                )}
+
                 {draft && draft.id === "__new" && draft.day === d && (
                   <div
                     className="pointer-events-none absolute inset-x-1 z-30 rounded-lg border-2 border-dashed border-primary bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-foreground"
@@ -278,7 +353,7 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
 }
 
 function SlotCard({
-  slot, domain, start, end, top, height, lane, lanes, dragging, onPointerDown, onResizeDown,
+  slot, domain, start, end, top, height, lane, lanes, dragging, live, onPointerDown, onResizeDown,
 }: {
   slot: Slot;
   domain?: Domain;
@@ -289,6 +364,7 @@ function SlotCard({
   lane: number;
   lanes: number;
   dragging?: boolean;
+  live?: boolean;
   onPointerDown?: (e: React.PointerEvent) => void;
   onResizeDown?: (e: React.PointerEvent) => void;
 }) {
@@ -306,7 +382,8 @@ function SlotCard({
         "group absolute z-10 cursor-grab select-none overflow-hidden rounded-lg px-1.5 text-[11px] leading-tight active:cursor-grabbing",
         "ring-1 ring-black/5 transition-shadow hover:shadow-md dark:ring-white/10",
         compact ? "flex items-center gap-1.5 py-0" : "py-1",
-        dragging && "z-30 opacity-95 shadow-lg ring-2 ring-primary"
+        dragging && "z-30 opacity-95 shadow-lg ring-2 ring-primary",
+        live && !dragging && "shadow-md ring-2 ring-primary"
       )}
       style={{
         top: top + 1,

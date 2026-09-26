@@ -49,3 +49,8 @@ export const saveTheme = (theme: Theme) => setValue("theme", theme);
 export function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle("dark", theme === "dark");
 }
+
+export async function getNotificationsEnabled(): Promise<boolean> {
+  return (await getValue<boolean>("notifications")) !== false;
+}
+export const saveNotificationsEnabled = (on: boolean) => setValue("notifications", on);

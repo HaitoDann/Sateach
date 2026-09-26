@@ -58,7 +58,8 @@ export interface DaySession {
   materials: string;
   review: string;
   hidden: boolean;
-  done: boolean;
+  /** 0 = pas encore validée, 1 = faite, 2 = non faite. */
+  done: number;
 }
 
 export interface WeekSettings {
@@ -73,4 +74,45 @@ export type EntryFields = Partial<
   Pick<JournalEntry, "title" | "start_min" | "end_min" | "domain_id" | "objectives" | "progression" | "materials" | "review" | "hidden" | "done">
 >;
 
-export type PageName = "timetable" | "journal" | "volumes" | "settings";
+export type EventKind = "meeting" | "holiday" | "event" | "other";
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  kind: EventKind;
+  start_date: string;
+  /** Inclusive; equal to start_date for a one-day event. */
+  end_date: string;
+  /** null = all day. */
+  start_min: number | null;
+  end_min: number | null;
+  notes: string;
+  /** Minutes before the start to notify (null = no reminder). For all-day
+   *  events the reference is 8:00 on the first day. */
+  reminder_min: number | null;
+}
+
+export interface ArchiveItem {
+  id: string;
+  domain_id: string | null;
+  /** Séquence / thème used to group courses inside a domain. */
+  folder: string;
+  title: string;
+  level: string;
+  objectives: string;
+  progression: string;
+  materials: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArchiveFile {
+  id: string;
+  item_id: string;
+  name: string;
+  /** Path relative to the vault folder. */
+  rel_path: string;
+}
+
+export type PageName = "timetable" | "journal" | "calendar" | "archive" | "volumes" | "settings";

@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import CalendarPage from "./CalendarPage";
+import ArchivePage from "./ArchivePage";
+import { checkReminders } from "../lib/notify";
 import Sidebar from "../components/Sidebar";
 import { VaultProvider, useVault } from "../context/VaultContext";
 import TimetablePage from "./TimetablePage";
@@ -16,13 +19,27 @@ interface Props {
 }
 
 function Pages({ page, setPage, theme, onTheme, onChangeVault }: Omit<Props, "vaultPath"> & { page: PageName; setPage: (p: PageName) => void }) {
-  const { loaded } = useVault();
+  const { loaded, toast } = useVault();
+
+  // Event reminders: check now, then every 30 s while the app is open.
+  useEffect(() => {
+    if (!loaded) return;
+    const tick = () => void checkReminders().then((sent) => sent.forEach((t) => toast(`Rappel : ${t}`))).catch(() => {});
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, [loaded, toast]);
+
   if (!loaded) return null;
   switch (page) {
     case "timetable":
       return <TimetablePage />;
     case "journal":
       return <JournalPage onNavigate={setPage} />;
+    case "calendar":
+      return <CalendarPage />;
+    case "archive":
+      return <ArchivePage />;
     case "volumes":
       return <VolumesPage />;
     case "settings":

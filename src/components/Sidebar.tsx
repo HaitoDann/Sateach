@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { CalendarRange, NotebookPen, ChartNoAxesColumn, Settings, Database, Moon, Sun } from "lucide-react";
+import { CalendarRange, NotebookPen, ChartNoAxesColumn, CalendarDays, Library, Settings, Database, Moon, Sun } from "lucide-react";
 import type { PageName } from "../lib/types";
 import { cn, getVaultName } from "../lib/utils";
-import logo from "../assets/logo.svg";
+import logo from "../assets/logo.png";
 
 // Nilo's compact icon rail: 64px wide, icons grow on hover, labels appear as
 // tooltips. Sat'each only has a handful of views, so the rail is all it needs.
@@ -33,6 +33,8 @@ function RailItem({ label, active, onClick, children }: { label: string; active?
 const NAV: { name: PageName; label: string; Icon: typeof CalendarRange }[] = [
   { name: "timetable", label: "Emploi du temps", Icon: CalendarRange },
   { name: "journal", label: "Cahier journal", Icon: NotebookPen },
+  { name: "calendar", label: "Calendrier", Icon: CalendarDays },
+  { name: "archive", label: "Mes cours", Icon: Library },
   { name: "volumes", label: "Volume horaire", Icon: ChartNoAxesColumn },
 ];
 
@@ -53,7 +55,7 @@ export default function Sidebar({ page, vaultPath, theme, onNavigate, onToggleTh
         className="mb-2 flex h-9 w-9 items-center justify-center transition-transform duration-200 hover:scale-110"
         title="Sat'each"
       >
-        <img src={logo} alt="Sat'each" className="h-8 w-8" />
+        <img src={logo} alt="Sat'each" className="h-9 w-9 object-contain" />
       </button>
 
       {NAV.map(({ name, label, Icon }) => (

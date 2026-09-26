@@ -13,7 +13,8 @@ import { forceBackup, listBackups, type BackupInfo } from "../lib/vault";
 import { isTauri } from "../lib/platform";
 import type { Domain } from "../lib/types";
 import { cn } from "../lib/utils";
-import type { Theme } from "../lib/store";
+import { getNotificationsEnabled, saveNotificationsEnabled, type Theme } from "../lib/store";
+import { ensurePermission } from "../lib/notify";
 
 const TIME_OPTIONS = Array.from({ length: 29 }, (_, i) => 6 * 60 + i * 30); // 06:00 → 20:00
 
@@ -27,7 +28,18 @@ export default function SettingsPage({ theme, onTheme, onChangeVault }: Props) {
   const { vaultPath, week, domains, slots, reload, toast, confirm } = useVault();
   const [backups, setBackups] = useState<BackupInfo[]>([]);
 
+  const [notifOn, setNotifOn] = useState(true);
   useEffect(() => { void listBackups(vaultPath).then(setBackups); }, [vaultPath]);
+  useEffect(() => { void getNotificationsEnabled().then(setNotifOn); }, []);
+
+  async function toggleNotif(v: "on" | "off") {
+    if (v === "on" && !(await ensurePermission())) {
+      toast("Les notifications sont bloquées par le système", "error");
+      return;
+    }
+    setNotifOn(v === "on");
+    await saveNotificationsEnabled(v === "on");
+  }
 
   async function toggleDay(d: number) {
     const days = week.days.includes(d) ? week.days.filter((x) => x !== d) : [...week.days, d].sort();
@@ -115,6 +127,17 @@ export default function SettingsPage({ theme, onTheme, onChangeVault }: Props) {
             <Button variant="outline" size="sm" className="gap-1.5" onClick={addDomain}>
               <Plus size={14} /> Ajouter un domaine
             </Button>
+          </Section>
+
+          <Section title="Notifications" description="Rappels des évènements du calendrier (réunions, vacances…), selon le délai choisi pour chaque évènement.">
+            <Field label="Rappels">
+              <SegmentedControl<"on" | "off">
+                options={[{ value: "on", label: "Activés" }, { value: "off", label: "Désactivés" }]}
+                value={notifOn ? "on" : "off"}
+                onChange={toggleNotif}
+                className="w-fit"
+              />
+            </Field>
           </Section>
 
           <Section title="Apparence">

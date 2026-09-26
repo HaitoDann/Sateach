@@ -254,6 +254,59 @@ fn restore_latest_backup(vault_path: String) -> Result<bool, String> {
     Ok(true)
 }
 
+// ── Archive files ("Mes cours") ─────────────────────────────────────────────
+// Documents attached to an archived course are copied into the vault, under
+// `Cours/<domaine>/`, so the vault stays self-contained (and synced).
+
+const ARCHIVE_DIR: &str = "Cours";
+
+fn sanitize(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if "<>:\"/\\|?*".contains(c) || c.is_control() { '_' } else { c })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.').to_string();
+    if trimmed.is_empty() { "Divers".into() } else { trimmed }
+}
+
+/// Copy `source` into `<vault>/Cours/<folder>/` (renaming on collision) and
+/// return its path relative to the vault, with forward slashes.
+#[tauri::command]
+fn import_archive_file(vault_path: String, source: String, folder: String) -> Result<String, String> {
+    let src = Path::new(&source);
+    let file_name = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("nom de fichier invalide")?;
+    let sub = sanitize(&folder);
+    let dir = Path::new(&vault_path).join(ARCHIVE_DIR).join(&sub);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("fichier");
+    let ext = src.extension().and_then(|s| s.to_str());
+    let mut name = sanitize(file_name);
+    let mut n = 2;
+    while dir.join(&name).exists() {
+        name = match ext {
+            Some(e) => format!("{} ({}).{}", sanitize(stem), n, e),
+            None => format!("{} ({})", sanitize(stem), n),
+        };
+        n += 1;
+    }
+    fs::copy(src, dir.join(&name)).map_err(|e| e.to_string())?;
+    Ok(format!("{}/{}/{}", ARCHIVE_DIR, sub, name))
+}
+
+/// Delete a copied archive file (only inside `<vault>/Cours`).
+#[tauri::command]
+fn remove_archive_file(vault_path: String, rel_path: String) -> Result<(), String> {
+    if !rel_path.starts_with(&format!("{}/", ARCHIVE_DIR)) || rel_path.contains("..") {
+        return Err("chemin refusé".into());
+    }
+    let _ = fs::remove_file(Path::new(&vault_path).join(&rel_path));
+    Ok(())
+}
+
 pub fn run() {
     let mut builder = tauri::Builder::default();
 
@@ -273,6 +326,8 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             backup_vault,
             has_backups,
@@ -281,7 +336,9 @@ pub fn run() {
             acquire_vault_lock,
             refresh_vault_lock,
             release_vault_lock,
-            force_release_vault_lock
+            force_release_vault_lock,
+            import_archive_file,
+            remove_archive_file
         ])
         .setup(|app| {
             // Use an explicit data directory to avoid WebView2 issues on domain accounts
@@ -298,6 +355,9 @@ pub fn run() {
                 .decorations(false)
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(1000.0, 640.0)
+                // HTML5 drag & drop (domain pastilles) needs the native file-drop
+                // handler off, otherwise WebView2 swallows the drag events.
+                .disable_drag_drop_handler()
                 .data_directory(data_dir)
                 .build()?;
 

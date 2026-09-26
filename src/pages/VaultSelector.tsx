@@ -7,7 +7,7 @@ import { DEMO_VAULT, VaultLockedError, forceReleaseLock, hasBackups, restoreLate
 import { isTauri } from "../lib/platform";
 import { getVaultName } from "../lib/utils";
 import { Button } from "../components/ui/Button";
-import logo from "../assets/logo.svg";
+import logo from "../assets/logo.png";
 
 interface Props {
   onVaultSelected: (path: string) => void;
@@ -84,7 +84,7 @@ export default function VaultSelector({ onVaultSelected }: Props) {
       />
       <div className="relative w-full max-w-sm space-y-8 px-6">
         <div className="flex flex-col items-center text-center">
-          <img src={logo} alt="" className="mb-4 h-16 w-16" />
+          <img src={logo} alt="" className="mb-2 h-28 w-28 object-contain" />
           <h1 className="text-5xl font-bold tracking-tight text-foreground">
             Sat'each
           </h1>

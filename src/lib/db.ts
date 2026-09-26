@@ -5,7 +5,7 @@ import { acquireLock, releaseLock } from "./vault";
 import { DEFAULT_DOMAINS } from "./domains";
 import { mergeDay, slotEntryId } from "./journal";
 import { fromDateKey, weekdayIndex } from "./time";
-import type { DaySession, Domain, EntryFields, JournalEntry, Slot, WeekSettings } from "./types";
+import type { ArchiveFile, ArchiveItem, CalendarEvent, DaySession, Domain, EntryFields, JournalEntry, Slot, WeekSettings } from "./types";
 
 // ─── Connection ───────────────────────────────────────────────────────────────
 // The vault is a folder; its data lives in `<vault>/sateach.db` (SQLite).
@@ -84,7 +84,7 @@ export async function checkpointWal(): Promise<void> {
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
-const LATEST_SCHEMA_VERSION = 1;
+const LATEST_SCHEMA_VERSION = 2;
 
 async function migrate(d: SqlDriver): Promise<void> {
   const rows = await d.select<{ user_version: number }>("PRAGMA user_version");
@@ -149,6 +149,45 @@ async function migrate(d: SqlDriver): Promise<void> {
         );
       }
     }
+  }
+
+  if (version < 2) {
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'event',
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        start_min INTEGER,
+        end_min INTEGER,
+        notes TEXT NOT NULL DEFAULT '',
+        reminder_min INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    await d.execute("CREATE INDEX IF NOT EXISTS idx_events_dates ON events(start_date, end_date)");
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS archive_items (
+        id TEXT PRIMARY KEY,
+        domain_id TEXT,
+        folder TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL,
+        level TEXT NOT NULL DEFAULT '',
+        objectives TEXT NOT NULL DEFAULT '',
+        progression TEXT NOT NULL DEFAULT '',
+        materials TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS archive_files (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        rel_path TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
   }
 
   if (version < LATEST_SCHEMA_VERSION) {
@@ -346,4 +385,79 @@ export async function getDatesWithContent(from: string, to: string): Promise<Set
     [from, to, from, to]
   );
   return new Set(rows.map((r) => r.date));
+}
+
+// ─── Calendar ─────────────────────────────────────────────────────────────────
+
+function toEvent(r: CalendarEvent): CalendarEvent {
+  const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  return { ...r, start_min: n(r.start_min), end_min: n(r.end_min), reminder_min: n(r.reminder_min) };
+}
+
+/** Events overlapping [from, to] (YYYY-MM-DD, inclusive). */
+export async function getEvents(from: string, to: string): Promise<CalendarEvent[]> {
+  const rows = await conn().select<CalendarEvent>(
+    "SELECT * FROM events WHERE start_date <= ? AND end_date >= ? ORDER BY start_date, COALESCE(start_min, -1), title",
+    [to, from]
+  );
+  return rows.map(toEvent);
+}
+
+export async function saveEvent(e: Omit<CalendarEvent, "id"> & { id?: string }): Promise<string> {
+  const id = e.id ?? generateId();
+  await conn().execute(
+    `INSERT INTO events (id, title, kind, start_date, end_date, start_min, end_min, notes, reminder_min)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET title = excluded.title, kind = excluded.kind, start_date = excluded.start_date,
+       end_date = excluded.end_date, start_min = excluded.start_min, end_min = excluded.end_min,
+       notes = excluded.notes, reminder_min = excluded.reminder_min`,
+    [id, e.title, e.kind, e.start_date, e.end_date, e.start_min, e.end_min, e.notes, e.reminder_min]
+  );
+  return id;
+}
+
+export async function deleteEvent(id: string): Promise<void> {
+  await conn().execute("DELETE FROM events WHERE id = ?", [id]);
+}
+
+// ─── Archive (mes cours) ──────────────────────────────────────────────────────
+
+export async function getArchiveItems(): Promise<ArchiveItem[]> {
+  return conn().select<ArchiveItem>("SELECT * FROM archive_items ORDER BY folder COLLATE NOCASE, title COLLATE NOCASE");
+}
+
+export async function saveArchiveItem(item: Omit<ArchiveItem, "id" | "created_at" | "updated_at"> & { id?: string }): Promise<string> {
+  const id = item.id ?? generateId();
+  await conn().execute(
+    `INSERT INTO archive_items (id, domain_id, folder, title, level, objectives, progression, materials, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET domain_id = excluded.domain_id, folder = excluded.folder, title = excluded.title,
+       level = excluded.level, objectives = excluded.objectives, progression = excluded.progression,
+       materials = excluded.materials, notes = excluded.notes, updated_at = datetime('now')`,
+    [id, item.domain_id, item.folder, item.title, item.level, item.objectives, item.progression, item.materials, item.notes]
+  );
+  return id;
+}
+
+export async function deleteArchiveItem(id: string): Promise<ArchiveFile[]> {
+  const files = await getArchiveFiles(id);
+  await conn().execute("DELETE FROM archive_files WHERE item_id = ?", [id]);
+  await conn().execute("DELETE FROM archive_items WHERE id = ?", [id]);
+  return files;
+}
+
+export async function getArchiveFiles(itemId?: string): Promise<ArchiveFile[]> {
+  return itemId
+    ? conn().select<ArchiveFile>("SELECT * FROM archive_files WHERE item_id = ? ORDER BY created_at", [itemId])
+    : conn().select<ArchiveFile>("SELECT * FROM archive_files ORDER BY created_at");
+}
+
+export async function addArchiveFile(itemId: string, name: string, relPath: string): Promise<string> {
+  const id = generateId();
+  await conn().execute("INSERT INTO archive_files (id, item_id, name, rel_path) VALUES (?, ?, ?, ?)", [id, itemId, name, relPath]);
+  return id;
+}
+
+export async function deleteArchiveFile(id: string): Promise<void> {
+  await conn().execute("DELETE FROM archive_files WHERE id = ?", [id]);
 }
