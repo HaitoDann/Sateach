@@ -1,8 +1,6 @@
 name: Build Windows
 
 # Builds the Windows installers (.exe NSIS + .msi).
-# - Manual run (Actions › Build Windows › Run workflow): the installers are
-#   attached to the run as a downloadable artifact.
 # - Every push to main: the release `v<version>` (version from
 #   tauri.conf.json) is created or updated with the installers attached.
 on:
@@ -47,12 +45,3 @@ jobs:
           tagName: v__VERSION__
           releaseName: "Sat'each v__VERSION__"
           releaseDraft: false
-
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: sateach-windows
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
-          retention-days: 14
