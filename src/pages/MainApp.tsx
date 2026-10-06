@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import CalendarPage from "./CalendarPage";
 import ArchivePage from "./ArchivePage";
 import { checkReminders } from "../lib/notify";
+import UpdateChecker from "../components/UpdateChecker";
 import Sidebar from "../components/Sidebar";
 import { VaultProvider, useVault } from "../context/VaultContext";
 import TimetablePage from "./TimetablePage";
@@ -74,6 +75,7 @@ export default function MainApp({ vaultPath, theme, onTheme, onChangeVault }: Pr
           </div>
         </main>
       </div>
+      <UpdateChecker />
     </VaultProvider>
   );
 }

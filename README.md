@@ -68,16 +68,25 @@ npm run typecheck && npm run lint && npm test
 Prérequis pour l'application de bureau : Node 20+, Rust stable, et les
 [prérequis Tauri](https://tauri.app/start/prerequisites/) de votre système.
 
-## Obtenir l'installateur Windows
+## Versions et mises à jour
 
-- `npm run tauri build` sur un PC Windows → `src-tauri/target/release/bundle/`.
-- Ou sur GitHub : **Actions › Build Windows › Run workflow**, puis téléchargez
-  l'artefact `sateach-windows` (.exe et .msi). Pousser un tag `v0.1.0` crée un
-  brouillon de release avec les installateurs.
+Chaque push sur `main` lance le workflow **Release** : si la version de
+`src-tauri/tauri.conf.json` n'est pas encore publiée, il construit l'installateur
+Windows signé et le publie, avec `latest.json`, sur le dépôt public
+`HaitoDann/Sateach-releases`. L'application vérifie ce fichier au démarrage et
+propose « Installer et redémarrer ».
 
-L'installateur n'est pas signé : Windows SmartScreen peut afficher « Windows a
-protégé votre ordinateur » → *Informations complémentaires* → *Exécuter quand
-même*.
+Pour publier une mise à jour : augmenter la version (tauri.conf.json,
+Cargo.toml, package.json), ajouter une section en tête de `CHANGELOG.md` (elle
+s'affiche dans la fenêtre de mise à jour), pousser sur `main`.
+
+Configuration requise (une fois) : le dépôt public `Sateach-releases` et les
+secrets `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (les
+mêmes que Nilo — même clé de signature) et `RELEASES_TOKEN`.
+
+L'installateur n'est pas signé Authenticode : Windows SmartScreen peut afficher
+« Windows a protégé votre ordinateur » → *Informations complémentaires* →
+*Exécuter quand même*.
 
 ## Structure
 

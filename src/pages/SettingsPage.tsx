@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Database, HardDriveDownload, Plus, Trash2 } from "lucide-react";
+import { Database, HardDriveDownload, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { UPDATE_EVENT, checkForUpdates } from "../components/UpdateChecker";
 import PageHeader from "../components/PageHeader";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
@@ -31,6 +32,15 @@ export default function SettingsPage({ theme, onTheme, onChangeVault }: Props) {
   const [notifOn, setNotifOn] = useState(true);
   useEffect(() => { void listBackups(vaultPath).then(setBackups); }, [vaultPath]);
   useEffect(() => { void getNotificationsEnabled().then(setNotifOn); }, []);
+
+  const [checking, setChecking] = useState(false);
+  async function lookForUpdate() {
+    setChecking(true);
+    const update = await checkForUpdates();
+    setChecking(false);
+    if (update) window.dispatchEvent(new CustomEvent(UPDATE_EVENT, { detail: update }));
+    else toast("Sat'each est à jour");
+  }
 
   async function toggleNotif(v: "on" | "off") {
     if (v === "on" && !(await ensurePermission())) {
@@ -173,7 +183,15 @@ export default function SettingsPage({ theme, onTheme, onChangeVault }: Props) {
             )}
           </Section>
 
-          <p className="pb-2 text-center text-xs text-muted-foreground">Sat'each {__APP_VERSION__}</p>
+          <div className="flex items-center justify-center gap-3 pb-2 text-xs text-muted-foreground">
+            <span>Sat'each {__APP_VERSION__}</span>
+            {isTauri() && (
+              <Button variant="outline" size="sm" className="h-7 gap-1.5" onClick={lookForUpdate} disabled={checking}>
+                <RefreshCw size={12} className={checking ? "animate-spin" : ""} />
+                Rechercher des mises à jour
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>

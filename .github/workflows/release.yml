@@ -1,0 +1,144 @@
+name: Release
+
+# Publishes a signed Windows release + latest.json (read by the in-app updater)
+# to the PUBLIC repository HaitoDann/Sateach-releases, so updates can be
+# downloaded while this source repository stays private.
+#
+# Runs on every push to main, but only builds when the version in
+# src-tauri/tauri.conf.json has no release yet: to ship an update, bump the
+# version (tauri.conf.json, Cargo.toml, package.json) and add a section on top
+# of CHANGELOG.md — its text is shown in the update card.
+#
+# Required secrets (Settings › Secrets and variables › Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           same value as in the Nilo repo
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  same value as in the Nilo repo
+#   RELEASES_TOKEN                      token allowed to write to Sateach-releases
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["README.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    env:
+      RELEASES_REPO: HaitoDann/Sateach-releases
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version and existing release
+        id: ver
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if (-not $env:GH_TOKEN) { Write-Error "RELEASES_TOKEN secret is not set"; exit 1 }
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          "VERSION=$version" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "TAG=v$version"    | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          gh release view "v$version" --repo $env:RELEASES_REPO *> $null
+          if ($LASTEXITCODE -eq 0) {
+            echo "v$version is already published — nothing to do (bump the version to release)."
+            "skip=true" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            echo "Releasing v$version"
+            "skip=false" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+          exit 0
+
+      - name: Setup Node.js
+        if: steps.ver.outputs.skip == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        if: steps.ver.outputs.skip == 'false'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        if: steps.ver.outputs.skip == 'false'
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        if: steps.ver.outputs.skip == 'false'
+        run: npm ci
+
+      - name: Build (signed)
+        if: steps.ver.outputs.skip == 'false'
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_B64: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY_B64) { Write-Error "TAURI_SIGNING_PRIVATE_KEY secret is not set"; exit 1 }
+          # Same convention as Nilo: the secret is base64(base64(key file)).
+          $env:TAURI_SIGNING_PRIVATE_KEY = [System.Text.Encoding]::UTF8.GetString(
+            [System.Convert]::FromBase64String($env:TAURI_SIGNING_PRIVATE_KEY_B64))
+          npm run tauri build
+
+      - name: Create latest.json
+        if: steps.ver.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          $v = $env:VERSION
+          $nsisZip = "src-tauri/target/release/bundle/nsis/Sateach_${v}_x64-setup.nsis.zip"
+          if (-not (Test-Path "$nsisZip.sig")) {
+            Get-ChildItem src-tauri/target/release/bundle -Recurse | Select-Object FullName
+            Write-Error "Signed NSIS bundle not found"; exit 1
+          }
+          # Update notes = top section of CHANGELOG.md.
+          $notes = ""; $in = $false; $lines = @()
+          foreach ($line in (Get-Content CHANGELOG.md)) {
+            if ($line -match '^##\s+') { if ($in) { break }; $in = $true; continue }
+            if ($in) { $lines += $line }
+          }
+          $notes = ($lines -join "`n").Trim()
+          $latest = [ordered]@{
+            version  = $v
+            notes    = $notes
+            pub_date = (Get-Date -AsUTC -Format "yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = (Get-Content "$nsisZip.sig" -Raw).Trim()
+                url       = "https://github.com/$env:RELEASES_REPO/releases/download/$env:TAG/Sateach_${v}_x64-setup.nsis.zip"
+              }
+            }
+          }
+          $latest | ConvertTo-Json -Depth 5 | Set-Content src-tauri/target/release/bundle/latest.json -Encoding UTF8
+          "NOTES<<EOF`n$notes`nEOF" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Get-Content src-tauri/target/release/bundle/latest.json
+
+      - name: Publish release
+        if: steps.ver.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: ${{ env.RELEASES_REPO }}
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: ${{ env.TAG }}
+          name: "Sat'each ${{ env.TAG }}"
+          body: |
+            ${{ env.NOTES }}
+
+            ---
+            **Installation** : téléchargez `Sateach_${{ env.VERSION }}_x64-setup.exe`. Si Windows affiche « Windows a protégé votre ordinateur » : *Informations complémentaires* → *Exécuter quand même*.
+            Les versions suivantes s'installent automatiquement depuis l'application.
+          files: |
+            src-tauri/target/release/bundle/nsis/Sateach_*_x64-setup.exe
+            src-tauri/target/release/bundle/nsis/Sateach_*_x64-setup.nsis.zip
+            src-tauri/target/release/bundle/nsis/Sateach_*_x64-setup.nsis.zip.sig
+            src-tauri/target/release/bundle/latest.json
