@@ -1,6 +1,6 @@
 [package]
 name = "sateach"
-version = "0.4.0"
+version = "0.4.1"
 description = "Sat'each — emploi du temps & cahier journal"
 edition = "2021"
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getLastVault, getTheme, saveTheme, applyTheme, clearLastVault, type Theme } from "./lib/store";
+import { getLastVault, getTheme, saveTheme, applyTheme, clearLastVault, getAccent, applyAccent, type Theme } from "./lib/store";
 import { openDatabase, closeDatabase, checkpointWal } from "./lib/db";
 import { autoBackup, hasBackups, restoreLatestBackup, releaseLock, VaultLockedError } from "./lib/vault";
 import VaultSelector from "./pages/VaultSelector";
@@ -19,6 +19,7 @@ export default function App() {
 
   useEffect(() => {
     getTheme().then((t) => { setTheme(t); applyTheme(t); });
+    getAccent().then(applyAccent);
 
     const onUnload = () => { void releaseLock(); };
     const onLockLost = () => {

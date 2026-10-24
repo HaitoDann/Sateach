@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Database, HardDriveDownload, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Database, HardDriveDownload, Pipette, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { UPDATE_EVENT, checkForUpdates } from "../components/UpdateChecker";
 import PageHeader from "../components/PageHeader";
 import { Button } from "../components/ui/Button";
@@ -14,7 +14,7 @@ import { forceBackup, listBackups, type BackupInfo } from "../lib/vault";
 import { isTauri } from "../lib/platform";
 import type { Domain } from "../lib/types";
 import { cn } from "../lib/utils";
-import { getNotificationsEnabled, saveNotificationsEnabled, type Theme } from "../lib/store";
+import { ACCENT_PRESETS, DEFAULT_ACCENT, applyAccent, getAccent, getNotificationsEnabled, saveAccent, saveNotificationsEnabled, type Theme } from "../lib/store";
 import { ensurePermission } from "../lib/notify";
 
 const TIME_OPTIONS = Array.from({ length: 29 }, (_, i) => 6 * 60 + i * 30); // 06:00 → 20:00
@@ -159,6 +159,9 @@ export default function SettingsPage({ theme, onTheme, onChangeVault }: Props) {
                 className="w-fit"
               />
             </Field>
+            <Field label="Couleur de l'interface">
+              <AccentPicker />
+            </Field>
           </Section>
 
           <Section title="Vault" description="Toutes vos données sont dans ce dossier (fichier sateach.db). Placez-le dans un dossier synchronisé (OneDrive, Google Drive…) pour le retrouver sur un autre ordinateur.">
@@ -274,6 +277,51 @@ function DomainRow({ domain, onChanged, onDelete }: { domain: Domain; onChanged:
       <button onClick={onDelete} className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive" title="Supprimer le domaine">
         <Trash2 size={14} />
       </button>
+    </div>
+  );
+}
+
+/** Favourite colour: presets + any colour; applied instantly to the whole interface. */
+function AccentPicker() {
+  const [color, setColor] = useState(DEFAULT_ACCENT);
+  useEffect(() => { void getAccent().then(setColor); }, []);
+
+  function pick(c: string) {
+    setColor(c);
+    applyAccent(c);
+    void saveAccent(c);
+  }
+
+  const custom = !ACCENT_PRESETS.some((p) => p.color.toLowerCase() === color.toLowerCase());
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {ACCENT_PRESETS.map((p) => {
+        const on = p.color.toLowerCase() === color.toLowerCase();
+        return (
+          <button
+            key={p.color}
+            onClick={() => pick(p.color)}
+            title={p.name}
+            aria-label={p.name}
+            className={cn("flex h-8 w-8 items-center justify-center rounded-full transition-transform hover:scale-110", on && "ring-2 ring-foreground ring-offset-2 ring-offset-background")}
+            style={{ backgroundColor: p.color }}
+          >
+            {on && <Check size={15} className="text-white drop-shadow" strokeWidth={3} />}
+          </button>
+        );
+      })}
+      <label
+        title="Choisir une autre couleur"
+        className={cn(
+          "relative flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-border px-3 text-xs text-muted-foreground hover:bg-muted",
+          custom && "ring-2 ring-foreground ring-offset-2 ring-offset-background"
+        )}
+      >
+        <span className="h-4 w-4 rounded-full border border-border" style={{ backgroundColor: color }} />
+        <Pipette size={13} /> Autre
+        <input type="color" value={color} onChange={(e) => pick(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
+      </label>
     </div>
   );
 }

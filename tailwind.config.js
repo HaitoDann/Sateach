@@ -35,20 +35,12 @@ export default {
           DEFAULT: token("destructive"),
           foreground: token("destructive-foreground"),
         },
-        // Sat'each identity — a teal ramp built around #00CEC8 (500).
-        // Text on light backgrounds uses 700+, fills use 400–500.
+        // Interface colour (user-selectable, see index.css --brand).
         brand: {
-          50: "#ecfdfc",
-          100: "#cffaf8",
-          200: "#a2f3f0",
-          300: "#66e6e2",
-          400: "#1fd6d0",
-          500: "#00cec8",
-          600: "#00a8a4",
-          700: "#008683",
-          800: "#066a68",
-          900: "#0a5755",
-          950: "#003736",
+          300: token("brand-300"),
+          500: token("brand-500"),
+          600: token("brand-600"),
+          700: token("brand-700"),
         },
       },
       fontFamily: {

@@ -16,15 +16,24 @@
   --muted-foreground: #56625f;
   --border: #dde6e5;
   --input: #d3dddc;
-  --primary: #00cec8;
-  --primary-foreground: #04302e;
+  /* Interface colour: everything below derives from --brand, chosen by the
+     teacher in Réglages › Apparence (set on <html> by applyAccent). */
+  --brand: #00cec8;
+  --on-brand: #04302e;
+  --on-brand-dark: #03201f;
+  --brand-300: color-mix(in srgb, var(--brand) 62%, white);
+  --brand-500: var(--brand);
+  --brand-600: color-mix(in srgb, var(--brand) 82%, black);
+  --brand-700: color-mix(in srgb, var(--brand) 64%, black);
+  --primary: var(--brand);
+  --primary-foreground: var(--on-brand);
   --secondary: #ecf1f1;
   --secondary-foreground: #172221;
-  --accent: #e1f7f6;
-  --accent-foreground: #0a4a48;
+  --accent: color-mix(in srgb, var(--brand) 12%, white);
+  --accent-foreground: color-mix(in srgb, var(--brand) 42%, #0b1615);
   --destructive: #d23b3b;
   --destructive-foreground: #ffffff;
-  --ring: #00cec8;
+  --ring: var(--brand);
   --radius: 0.5rem;
 }
 
@@ -36,15 +45,15 @@
   --muted-foreground: #93a4a2;
   --border: #293736;
   --input: #324342;
-  --primary: #2fd9d3;
-  --primary-foreground: #03201f;
+  --primary: color-mix(in srgb, var(--brand) 85%, white);
+  --primary-foreground: var(--on-brand-dark);
   --secondary: #1c2626;
   --secondary-foreground: #e3ebea;
-  --accent: #163130;
-  --accent-foreground: #c6f4f2;
+  --accent: color-mix(in srgb, var(--brand) 20%, #131a1a);
+  --accent-foreground: color-mix(in srgb, var(--brand) 32%, white);
   --destructive: #f07171;
   --destructive-foreground: #131a1a;
-  --ring: #2fd9d3;
+  --ring: color-mix(in srgb, var(--brand) 85%, white);
 }
 
 * {

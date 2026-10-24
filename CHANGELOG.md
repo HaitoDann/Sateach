@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Couleur de l'interface au choix (Réglages › Apparence) : 11 couleurs proposées ou n'importe quelle autre, en thème clair comme sombre.
+
 ## 0.4.0
 
 - Dossiers par domaine (Français › Grammaire, Conjugaison… ; Mathématiques › Nombres, Calcul…) pour ranger les fiches et les séquences.
