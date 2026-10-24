@@ -1,5 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Archive, Check, ChevronDown, X, Clock, EyeOff, Pencil, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AutoTextarea } from "../ui/AutoTextarea";
+import { Check, ChevronDown, X, Clock, Copy, Eye, EyeOff, FileText, GripVertical, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import Attachments from "../common/Attachments";
+import { sessionDrag } from "../../lib/nav";
 import type { DaySession, Domain, EntryFields } from "../../lib/types";
 import { fmtDuration, fmtTime } from "../../lib/time";
 import { cn, withAlpha } from "../../lib/utils";
@@ -16,30 +19,6 @@ export const FIELDS: { key: TextField; label: string; placeholder: string; wide?
   { key: "review", label: "Bilan / remarques", placeholder: "Ce qui a fonctionné, élèves à revoir, à reprendre demain…" },
 ];
 
-/** Textarea that grows with its content (no inner scrollbar). */
-function AutoTextarea({ value, onChange, placeholder, minRows = 2, label }: {
-  value: string; onChange: (v: string) => void; placeholder: string; minRows?: number; label: string;
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight + 2}px`;
-  }, [value]);
-  return (
-    <textarea
-      ref={ref}
-      rows={minRows}
-      value={value}
-      aria-label={label}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="autogrow w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-    />
-  );
-}
-
 interface Props {
   session: DaySession;
   domain?: Domain;
@@ -48,16 +27,20 @@ interface Props {
   /** Debounced text save (fields only — no reload needed). */
   onSaveText: (patch: EntryFields) => Promise<void>;
   onSetDone: (v: number) => void;
-  onArchive: () => void;
   /** The séance is happening right now. */
   live?: boolean;
+  onEdit: () => void;
+  onCopy: () => void;
+  onPrep: () => void;
   onHide: () => void;
-  onEditTime: () => void;
-  onDelete?: () => void;
+  onUnhide: () => void;
+  onDelete: () => void;
   index: number;
 }
 
-export default function SessionCard({ session, domain, expanded, onToggle, onSaveText, onSetDone, onArchive, live, onHide, onEditTime, onDelete, index }: Props) {
+export default function SessionCard({
+  session, domain, expanded, onToggle, onSaveText, onSetDone, live, onEdit, onCopy, onPrep, onHide, onUnhide, onDelete, index,
+}: Props) {
   const [values, setValues] = useState<Record<TextField, string>>({
     objectives: session.objectives,
     progression: session.progression,
@@ -65,6 +48,7 @@ export default function SessionCard({ session, domain, expanded, onToggle, onSav
     review: session.review,
   });
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [menu, setMenu] = useState(false);
   const pending = useRef<EntryFields>({});
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveRef = useRef(onSaveText);
@@ -89,6 +73,12 @@ export default function SessionCard({ session, domain, expanded, onToggle, onSav
     };
   }, [flush]);
 
+  // Text edited elsewhere (undo, copy) → follow the stored values.
+  useEffect(() => {
+    if (Object.keys(pending.current).length) return;
+    setValues({ objectives: session.objectives, progression: session.progression, materials: session.materials, review: session.review });
+  }, [session.objectives, session.progression, session.materials, session.review]);
+
   function change(key: TextField, v: string) {
     setValues((cur) => ({ ...cur, [key]: v }));
     pending.current = { ...pending.current, [key]: v };
@@ -101,20 +91,27 @@ export default function SessionCard({ session, domain, expanded, onToggle, onSav
   const title = session.title.trim() || domain?.name || "Séance";
   const filled = FIELDS.filter((f) => values[f.key].trim());
 
-  // Hors-domaine séances (récréation, cantine…) are thin separators, not lessons.
-  if (!domain) {
+  // Masquée pour ce jour: stays in place, greyed, with an obvious way back.
+  if (session.hidden === 1) {
     return (
-      <div className="group flex items-center gap-3 px-1 py-1 text-xs text-muted-foreground animate-item-in" style={{ animationDelay: `${index * 25}ms` }}>
-        <span className="w-[92px] shrink-0 tabular-nums">{fmtTime(session.start_min)} – {fmtTime(session.end_min)}</span>
-        <span className="h-px flex-1 bg-border" />
-        <button onClick={onEditTime} className="rounded px-1 hover:bg-muted hover:text-foreground" title="Modifier">{title}</button>
-        <span className="h-px w-6 bg-border" />
-        <button onClick={onHide} title="Masquer pour ce jour" className="rounded p-1 opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100">
-          <EyeOff size={12} />
+      <div className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-2.5 animate-item-in">
+        <span className="w-[76px] shrink-0 text-xs tabular-nums text-muted-foreground">{fmtTime(session.start_min)} – {fmtTime(session.end_min)}</span>
+        <EyeOff size={14} className="shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+          <span className="line-through">{title}</span>
+          <span className="ml-2 text-xs">masquée pour ce jour</span>
+        </span>
+        <button onClick={onUnhide} className="flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90">
+          <Eye size={13} /> Réafficher
+        </button>
+        <button onClick={onDelete} title="Supprimer de ce jour" className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+          <Trash2 size={14} />
         </button>
       </div>
     );
   }
+
+  const neutral = !domain;
 
   return (
     <div
@@ -126,32 +123,52 @@ export default function SessionCard({ session, domain, expanded, onToggle, onSav
       style={{ animationDelay: `${index * 25}ms` }}
     >
       <div className="flex items-stretch">
+        {/* Drag handle: drop on a day of the week (side panel) to copy */}
+        <div
+          draggable
+          onDragStart={(e) => { sessionDrag.key = session.key; e.dataTransfer.effectAllowed = "copy"; e.dataTransfer.setData("text/plain", title); }}
+          onDragEnd={() => { sessionDrag.key = null; }}
+          title="Glisser sur un jour de la semaine (à droite) pour copier la séance"
+          className="flex w-5 shrink-0 cursor-grab items-center justify-center rounded-l-xl text-muted-foreground/40 hover:bg-muted hover:text-muted-foreground active:cursor-grabbing"
+        >
+          <GripVertical size={14} />
+        </div>
         {/* Time */}
-        <div className="flex w-[92px] shrink-0 flex-col justify-center py-3 pl-4 tabular-nums">
+        <div className="flex w-[64px] shrink-0 flex-col justify-center py-3 pl-1 tabular-nums">
           <span className="text-sm font-medium text-foreground">{fmtTime(session.start_min)}</span>
           <span className="text-xs text-muted-foreground">{fmtTime(session.end_min)}</span>
         </div>
-        <div className="my-2.5 w-1 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+        <div
+          className={cn("my-2.5 w-1 shrink-0 rounded-full", neutral && "bg-muted-foreground/30")}
+          style={color ? { backgroundColor: color } : undefined}
+        />
 
         {/* Title + preview */}
         <button onClick={onToggle} className="min-w-0 flex-1 px-4 py-3 text-left">
-          <div className="flex items-center gap-2">
-            <span className={cn("truncate font-medium text-foreground", session.done === 1 && "text-muted-foreground")}>
-              {title}
-            </span>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className={cn("truncate font-medium text-foreground", session.done === 1 && "text-muted-foreground")}>{title}</span>
             <span
-              className="shrink-0 rounded-full px-2 py-px text-[11px] font-medium text-foreground/80"
-              style={{ backgroundColor: withAlpha(color!, 0.16) }}
+              className={cn("shrink-0 rounded-full px-2 py-px text-[11px] font-medium", neutral ? "bg-muted text-muted-foreground" : "text-foreground/80")}
+              style={color ? { backgroundColor: withAlpha(color, 0.16) } : undefined}
             >
-              {domain.name}
+              {domain?.name ?? "Autre"}
             </span>
             <span className="shrink-0 text-xs text-muted-foreground">{fmtDuration(session.end_min - session.start_min)}</span>
+            {session.prepId && (
+              <span
+                role="link"
+                onClick={(e) => { e.stopPropagation(); onPrep(); }}
+                className="flex shrink-0 items-center gap-1 rounded-full border border-primary/40 px-2 py-px text-[11px] text-brand-700 hover:bg-accent dark:text-brand-300"
+              >
+                <FileText size={11} /> Fiche de prépa
+              </span>
+            )}
             {live && (
               <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary px-2 py-px text-[11px] font-medium text-primary-foreground">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary-foreground" /> en cours
               </span>
             )}
-            {session.oneOff && <span className="shrink-0 text-[11px] text-brand-700 dark:text-brand-300">ponctuelle</span>}
+            {session.oneOff && <span className="shrink-0 text-[11px] text-brand-700 dark:text-brand-300">ce jour uniquement</span>}
           </div>
           {!expanded && filled.length > 0 && (
             <div className="mt-1.5 space-y-0.5">
@@ -169,16 +186,7 @@ export default function SessionCard({ session, domain, expanded, onToggle, onSav
         </button>
 
         {/* Actions */}
-        <div className="flex shrink-0 items-start gap-0.5 py-2.5 pr-2.5">
-          <div className="flex gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-            <IconBtn title="Archiver dans Mes cours" onClick={onArchive}><Archive size={14} /></IconBtn>
-            <IconBtn title={session.slotId ? "Modifier l'horaire pour ce jour" : "Modifier la séance"} onClick={onEditTime}><Pencil size={14} /></IconBtn>
-            {onDelete ? (
-              <IconBtn title="Supprimer cette séance ponctuelle" onClick={onDelete} danger><Trash2 size={14} /></IconBtn>
-            ) : (
-              <IconBtn title="Annuler pour ce jour (sortie, absence…)" onClick={onHide}><EyeOff size={14} /></IconBtn>
-            )}
-          </div>
+        <div className="flex shrink-0 items-start gap-1 py-2.5 pr-2.5">
           {/* Validation: faite / non faite (click again to clear) */}
           <div className="flex overflow-hidden rounded-full border border-border">
             <button
@@ -204,6 +212,27 @@ export default function SessionCard({ session, domain, expanded, onToggle, onSav
               {session.done === 2 && "Non faite"}
             </button>
           </div>
+
+          {/* Menu with every action, labelled */}
+          <div className="relative">
+            <button onClick={() => setMenu((v) => !v)} title="Actions" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+              <MoreHorizontal size={16} />
+            </button>
+            {menu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} />
+                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-border bg-card py-1 shadow-xl" onClick={() => setMenu(false)}>
+                  <MenuItem icon={<Pencil size={14} />} label="Modifier pour ce jour" hint="l'emploi du temps ne change pas" onClick={onEdit} />
+                  <MenuItem icon={<Copy size={14} />} label="Copier vers d'autres jours…" onClick={onCopy} />
+                  <MenuItem icon={<FileText size={14} />} label={session.prepId ? "Ouvrir la fiche de préparation" : "Créer la fiche de préparation"} onClick={onPrep} />
+                  <div className="my-1 h-px bg-border" />
+                  <MenuItem icon={<EyeOff size={14} />} label="Masquer pour ce jour" hint="réaffichable à tout moment" onClick={onHide} />
+                  <MenuItem icon={<Trash2 size={14} />} label="Supprimer de ce jour…" danger onClick={onDelete} />
+                </div>
+              </>
+            )}
+          </div>
+
           <button onClick={onToggle} title={expanded ? "Replier" : "Détailler"} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
             <ChevronDown size={16} className={cn("transition-transform duration-200", expanded && "rotate-180")} />
           </button>
@@ -226,9 +255,15 @@ export default function SessionCard({ session, domain, expanded, onToggle, onSav
               </div>
             ))}
           </div>
-          <div className="mt-2 flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
-            {status === "saving" && <><Clock size={11} /> Enregistrement…</>}
-            {status === "saved" && <><Check size={11} className="text-brand-600" /> Enregistré</>}
+          <Attachments ownerType="entry" ownerId={session.entryId} className="mt-3" />
+          <div className="mt-2 flex items-center justify-between gap-1.5 text-[11px] text-muted-foreground">
+            <button onClick={onPrep} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-brand-700 hover:bg-accent dark:text-brand-300">
+              <FileText size={12} /> {session.prepId ? "Ouvrir la fiche de préparation" : "Préparer en détail (fiche de préparation)"}
+            </button>
+            <span className="flex items-center gap-1.5">
+              {status === "saving" && <><Clock size={11} /> Enregistrement…</>}
+              {status === "saved" && <><Check size={11} className="text-brand-600" /> Enregistré</>}
+            </span>
           </div>
         </div>
       )}
@@ -236,17 +271,17 @@ export default function SessionCard({ session, domain, expanded, onToggle, onSav
   );
 }
 
-function IconBtn({ title, onClick, children, danger }: { title: string; onClick: () => void; children: React.ReactNode; danger?: boolean }) {
+function MenuItem({ icon, label, hint, onClick, danger }: { icon: React.ReactNode; label: string; hint?: string; onClick: () => void; danger?: boolean }) {
   return (
     <button
       onClick={onClick}
-      title={title}
-      className={cn(
-        "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors",
-        danger ? "hover:bg-destructive/10 hover:text-destructive" : "hover:bg-muted hover:text-foreground"
-      )}
+      className={cn("flex w-full items-start gap-2.5 px-3 py-2 text-left text-sm transition-colors", danger ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-muted")}
     >
-      {children}
+      <span className="mt-0.5 shrink-0 text-muted-foreground">{icon}</span>
+      <span>
+        {label}
+        {hint && <span className="block text-[11px] text-muted-foreground">{hint}</span>}
+      </span>
     </button>
   );
 }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import CalendarPage from "./CalendarPage";
-import ArchivePage from "./ArchivePage";
+import YearPage from "./YearPage";
+import SequencesPage from "./SequencesPage";
+import PrepsPage from "./PrepsPage";
 import { checkReminders } from "../lib/notify";
 import UpdateChecker from "../components/UpdateChecker";
 import Sidebar from "../components/Sidebar";
@@ -39,8 +41,12 @@ function Pages({ page, setPage, theme, onTheme, onChangeVault }: Omit<Props, "va
       return <JournalPage onNavigate={setPage} />;
     case "calendar":
       return <CalendarPage />;
-    case "archive":
-      return <ArchivePage />;
+    case "year":
+      return <YearPage onNavigate={setPage} />;
+    case "sequences":
+      return <SequencesPage onNavigate={setPage} />;
+    case "preps":
+      return <PrepsPage onNavigate={setPage} />;
     case "volumes":
       return <VolumesPage />;
     case "settings":
@@ -50,7 +56,11 @@ function Pages({ page, setPage, theme, onTheme, onChangeVault }: Omit<Props, "va
 
 export default function MainApp({ vaultPath, theme, onTheme, onChangeVault }: Props) {
   const [page, setPage] = useState<PageName>(() => {
-    try { return (localStorage.getItem("sateach:page") as PageName) || "timetable"; } catch { return "timetable"; }
+    const pages: PageName[] = ["timetable", "journal", "calendar", "year", "sequences", "preps", "volumes", "settings"];
+    try {
+      const saved = localStorage.getItem("sateach:page") as PageName;
+      return pages.includes(saved) ? saved : "timetable";
+    } catch { return "timetable"; }
   });
 
   function navigate(p: PageName) {

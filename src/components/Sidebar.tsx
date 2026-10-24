@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CalendarRange, NotebookPen, ChartNoAxesColumn, CalendarDays, Library, Settings, Database, Moon, Sun } from "lucide-react";
+import { CalendarRange, NotebookPen, ChartNoAxesColumn, CalendarDays, CalendarFold, ClipboardList, Layers, Settings, Database, Moon, Sun } from "lucide-react";
 import type { PageName } from "../lib/types";
 import { cn, getVaultName } from "../lib/utils";
 import logo from "../assets/logo.png";
@@ -34,7 +34,9 @@ const NAV: { name: PageName; label: string; Icon: typeof CalendarRange }[] = [
   { name: "timetable", label: "Emploi du temps", Icon: CalendarRange },
   { name: "journal", label: "Cahier journal", Icon: NotebookPen },
   { name: "calendar", label: "Calendrier", Icon: CalendarDays },
-  { name: "archive", label: "Mes cours", Icon: Library },
+  { name: "year", label: "Programmation", Icon: CalendarFold },
+  { name: "sequences", label: "Séquences", Icon: Layers },
+  { name: "preps", label: "Fiches de préparation", Icon: ClipboardList },
   { name: "volumes", label: "Volume horaire", Icon: ChartNoAxesColumn },
 ];
 

@@ -1,6 +1,6 @@
 [package]
 name = "sateach"
-version = "0.2.0"
+version = "0.3.0"
 description = "Sat'each — emploi du temps & cahier journal"
 edition = "2021"
 
@@ -12,7 +12,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-store = "2"
 tauri-plugin-dialog = "2"

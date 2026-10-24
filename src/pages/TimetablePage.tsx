@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { Plus, MousePointerClick, GripVertical } from "lucide-react";
+import { Plus, MousePointerClick, GripVertical, Printer } from "lucide-react";
+import UndoButton from "../components/common/UndoButton";
+import TimetablePrint from "../components/timetable/TimetablePrint";
 import { SegmentedControl } from "../components/ui/SegmentedControl";
 import PageHeader from "../components/PageHeader";
 import WeekGrid, { pastilleDrag } from "../components/timetable/WeekGrid";
@@ -7,7 +9,7 @@ import { withAlpha } from "../lib/utils";
 import SessionDialog, { type SessionValues } from "../components/SessionDialog";
 import { Button } from "../components/ui/Button";
 import { useVault } from "../context/VaultContext";
-import { createSlot, deleteSlot, updateSlot } from "../lib/db";
+import { createSlot, deleteSlot, getEntriesForSlot, replaceSlots, restoreEntryRow, updateSlot } from "../lib/db";
 import { computeVolumes } from "../lib/domains";
 import { fmtDuration } from "../lib/time";
 import type { Slot } from "../lib/types";
@@ -15,7 +17,15 @@ import type { Slot } from "../lib/types";
 type Editing = { kind: "new"; initial: SessionValues } | { kind: "edit"; slot: Slot };
 
 export default function TimetablePage() {
-  const { domains, domainById, slots, week, reload, toast, confirm } = useVault();
+  const { domains, domainById, slots, week, reload, toast, confirm, pushUndo } = useVault();
+
+  /** Snapshot the timetable, run `op`, and offer to undo it. */
+  async function withUndo(label: string, op: () => Promise<void>, extraUndo?: () => Promise<void>) {
+    const before = slots.map((s) => ({ ...s }));
+    await op();
+    pushUndo(label, async () => { await replaceSlots(before); if (extraUndo) await extraUndo(); });
+    await reload();
+  }
   const [editing, setEditing] = useState<Editing | null>(null);
   const [lastDomain, setLastDomain] = useState<string | null>(null);
   const [dropDuration, setDropDuration] = useState(45);
@@ -34,12 +44,14 @@ export default function TimetablePage() {
   async function save(v: SessionValues) {
     try {
       if (editing?.kind === "edit") {
-        await updateSlot(editing.slot.id, { title: v.title, domain_id: v.domain_id, start_min: v.start_min, end_min: v.end_min, day: v.days[0] });
+        const id = editing.slot.id;
+        await withUndo("Séance modifiée", () => updateSlot(id, { title: v.title, domain_id: v.domain_id, start_min: v.start_min, end_min: v.end_min, day: v.days[0] }));
       } else {
-        for (const day of v.days) {
-          await createSlot({ title: v.title, domain_id: v.domain_id, start_min: v.start_min, end_min: v.end_min, day });
-        }
-        if (v.days.length > 1) toast(`Séance ajoutée sur ${v.days.length} jours`);
+        await withUndo(v.days.length > 1 ? `Séance ajoutée sur ${v.days.length} jours` : "Séance ajoutée", async () => {
+          for (const day of v.days) {
+            await createSlot({ title: v.title, domain_id: v.domain_id, start_min: v.start_min, end_min: v.end_min, day });
+          }
+        });
       }
       setLastDomain(v.domain_id);
       setEditing(null);
@@ -57,25 +69,34 @@ export default function TimetablePage() {
       destructive: true,
     });
     if (!ok) return;
-    await deleteSlot(slot.id);
+    const entries = await getEntriesForSlot(slot.id);
+    await withUndo("Séance supprimée de l'emploi du temps", () => deleteSlot(slot.id), async () => {
+      for (const e of entries) await restoreEntryRow(e.id, e);
+    });
     setEditing(null);
     await reload();
   }
 
   async function dropDomain(domainId: string | null, day: number, start: number, end: number) {
-    await createSlot({ day, start_min: start, end_min: end, domain_id: domainId, title: domainId ? "" : "Récréation" });
+    await withUndo("Séance ajoutée", async () => {
+      await createSlot({ day, start_min: start, end_min: end, domain_id: domainId, title: domainId ? "" : "Récréation" });
+    });
     setLastDomain(domainId);
     await reload();
   }
 
   async function move(id: string, patch: Pick<Slot, "day" | "start_min" | "end_min">) {
-    await updateSlot(id, patch);
+    await withUndo("Séance déplacée", () => updateSlot(id, patch));
     await reload();
   }
 
   return (
     <div className="flex h-full flex-col">
       <PageHeader title="Emploi du temps" subtitle={`${fmtDuration(total)} d'enseignement par semaine`}>
+        <UndoButton />
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => window.print()} title="Imprimer ou enregistrer en PDF (choisir « Microsoft Print to PDF »)">
+          <Printer size={14} /> Imprimer / PDF
+        </Button>
         <Button size="sm" className="gap-1.5" onClick={() => openNew(week.days[0] ?? 0, 8 * 60 + 30, 9 * 60 + 15)}>
           <Plus size={15} />
           Nouvelle séance
@@ -126,6 +147,8 @@ export default function TimetablePage() {
           </div>
         )}
       </div>
+
+      <TimetablePrint />
 
       {editing && (
         <SessionDialog

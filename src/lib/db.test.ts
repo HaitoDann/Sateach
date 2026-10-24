@@ -50,8 +50,8 @@ describe("vault database", () => {
 
     const after = await getJournalDay(MONDAY, await getSlots());
     expect(after.sessions.map((s) => [s.title, s.hidden, s.oneOff])).toEqual([
-      ["Sortie musée", false, true],
-      ["Calcul mental", true, false],
+      ["Sortie musée", 0, true],
+      ["Calcul mental", 1, false],
     ]);
   });
 
@@ -81,5 +81,53 @@ describe("vault database", () => {
     await saveDayNotes(MONDAY, "Réunion à 17h");
     await saveDayNotes(MONDAY, "Réunion à 17h30");
     expect((await getJournalDay(MONDAY, [])).notes).toBe("Réunion à 17h30");
+  });
+});
+
+describe("v3: fiches, séquences, copie, annulation", () => {
+  it("copies a séance to another day and restores a snapshot", async () => {
+    const { copySessionTo, getEntryRow, restoreEntryRow, savePrep, saveSequence, getPreps, deleteSequence } = await import("./db");
+    const [, maths] = await getDomains();
+    await createSlot({ day: 0, start_min: 510, end_min: 525, domain_id: maths.id, title: "Calcul mental" });
+    const [s] = (await getJournalDay(MONDAY, await getSlots())).sessions;
+    await saveSessionFields(MONDAY, s, { objectives: "Tables" });
+    const fresh = (await getJournalDay(MONDAY, await getSlots())).sessions[0];
+    await copySessionTo("2026-09-29", fresh);
+    const tue = await getJournalDay("2026-09-29", await getSlots());
+    expect(tue.sessions.map((x) => [x.title, x.start_min, x.objectives, x.oneOff])).toEqual([["Calcul mental", 510, "Tables", true]]);
+
+    const before = await getEntryRow(fresh.entryId);
+    await saveSessionFields(MONDAY, fresh, { hidden: 2 });
+    await restoreEntryRow(fresh.entryId, before);
+    expect((await getJournalDay(MONDAY, await getSlots())).sessions[0].hidden).toBe(0);
+
+    const seq = await saveSequence({ domain_id: maths.id, title: "Fractions", levels: "CM1", nb_sessions: 6, general_objectives: "", end_of_cycle: "", review: "", period: 2 });
+    await savePrep({ sequence_id: seq, domain_id: maths.id, title: "Découverte", number: 1, duration_min: 45, objective: "", skills: "", materials: "", organisation: "",
+      phases: [{ phase: "Découverte", duration: "10 min", materials: "", progression: "Manipulation", students: "" }], review: "" });
+    expect((await getPreps())[0].phases[0].progression).toBe("Manipulation");
+    await deleteSequence(seq);
+    expect((await getPreps())[0].sequence_id).toBeNull();
+  });
+});
+
+describe("migration v2 → v3", () => {
+  it("turns « Mes cours » into séquences + fiches", async () => {
+    const { saveArchiveItem, addArchiveFile, getPreps, getSequences, getAttachments } = await import("./db");
+    const driver = await openSqlJsDriver();
+    await attachDriver(driver);
+    const [, maths] = await getDomains();
+    const id = await saveArchiveItem({ domain_id: maths.id, folder: "Numération", title: "Nombres à 1000", level: "CE1", objectives: "Lire", progression: "Étapes", materials: "Cubes", notes: "Bien" });
+    await addArchiveFile(id, "fiche.pdf", "Cours/Maths/fiche.pdf");
+    await driver.execute("DELETE FROM preps");
+    await driver.execute("DELETE FROM sequences");
+    await driver.execute("DELETE FROM attachments");
+    await driver.execute("PRAGMA user_version = 2");
+    await attachDriver(driver);
+    const [seq] = await getSequences();
+    const [prep] = await getPreps();
+    expect(seq).toMatchObject({ title: "Numération", levels: "CE1", domain_id: maths.id });
+    expect(prep).toMatchObject({ id, title: "Nombres à 1000", sequence_id: seq.id, objective: "Lire", materials: "Cubes", review: "Bien" });
+    expect(prep.phases[0].progression).toBe("Étapes");
+    expect((await getAttachments("prep", id)).map((a) => a.name)).toEqual(["fiche.pdf"]);
   });
 });

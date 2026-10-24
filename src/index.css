@@ -109,6 +109,10 @@ textarea.autogrow {
     size: A4;
     margin: 12mm;
   }
+  @page landscape {
+    size: A4 landscape;
+    margin: 10mm;
+  }
   html,
   body {
     background: #fff !important;
@@ -119,6 +123,10 @@ textarea.autogrow {
   }
   .print-root {
     display: block;
+  }
+  /* Landscape sheets (timetable, fiche de préparation). */
+  .print-landscape {
+    page: landscape;
   }
   .print-break-avoid {
     break-inside: avoid;

@@ -35,8 +35,11 @@ export interface JournalEntry {
   progression: string;
   materials: string;
   review: string;
+  /** 0 = visible, 1 = masquée (affichée en grisé), 2 = supprimée de ce jour. */
   hidden: number;
   done: number;
+  /** Linked fiche de préparation. */
+  prep_id: string | null;
 }
 
 /** A séance as shown in the cahier journal: the timetable slot merged with
@@ -57,7 +60,9 @@ export interface DaySession {
   progression: string;
   materials: string;
   review: string;
-  hidden: boolean;
+  /** 0 = visible, 1 = masquée, 2 = supprimée de ce jour. */
+  hidden: number;
+  prepId: string | null;
   /** 0 = pas encore validée, 1 = faite, 2 = non faite. */
   done: number;
 }
@@ -71,7 +76,7 @@ export interface WeekSettings {
 }
 
 export type EntryFields = Partial<
-  Pick<JournalEntry, "title" | "start_min" | "end_min" | "domain_id" | "objectives" | "progression" | "materials" | "review" | "hidden" | "done">
+  Pick<JournalEntry, "title" | "start_min" | "end_min" | "domain_id" | "objectives" | "progression" | "materials" | "review" | "hidden" | "done" | "prep_id">
 >;
 
 export type EventKind = "meeting" | "holiday" | "event" | "other";
@@ -115,4 +120,74 @@ export interface ArchiveFile {
   rel_path: string;
 }
 
-export type PageName = "timetable" | "journal" | "calendar" | "archive" | "volumes" | "settings";
+/** One row of the « phases » table of a fiche de préparation. */
+export interface PrepPhase {
+  phase: string;
+  duration: string;
+  materials: string;
+  progression: string;
+  students: string;
+}
+
+/** Fiche de préparation de séance. */
+export interface Prep {
+  id: string;
+  sequence_id: string | null;
+  domain_id: string | null;
+  title: string;
+  /** Séance n (in its séquence). */
+  number: number | null;
+  duration_min: number | null;
+  objective: string;
+  skills: string;
+  materials: string;
+  organisation: string;
+  phases: PrepPhase[];
+  review: string;
+  updated_at: string;
+}
+
+/** Fiche de préparation de séquence. */
+export interface Sequence {
+  id: string;
+  domain_id: string | null;
+  title: string;
+  levels: string;
+  nb_sessions: number | null;
+  general_objectives: string;
+  end_of_cycle: string;
+  review: string;
+  /** Période 1–5 of the programmation (null = non planifiée). */
+  period: number | null;
+  updated_at: string;
+}
+
+export type AttachmentOwner = "entry" | "prep" | "sequence";
+
+export interface Attachment {
+  id: string;
+  owner_type: AttachmentOwner;
+  owner_id: string;
+  name: string;
+  /** Path relative to the vault folder. */
+  rel_path: string;
+}
+
+export interface Holiday {
+  name: string;
+  /** First day off / last day off (YYYY-MM-DD, inclusive). */
+  start: string;
+  end: string;
+}
+
+/** Programmation annuelle: school year bounds, zone and holidays (the 5
+ *  périodes are derived from them). */
+export interface YearSettings {
+  zone: "A" | "B" | "C";
+  schoolStart: string;
+  schoolEnd: string;
+  holidays: Holiday[];
+}
+
+export type PageName =
+  | "timetable" | "journal" | "calendar" | "year" | "sequences" | "preps" | "volumes" | "settings";

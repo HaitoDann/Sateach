@@ -25,9 +25,16 @@ interface VaultContextValue {
   slots: Slot[];
   week: WeekSettings;
   reload: () => Promise<void>;
-  toast: (message: string, type?: "success" | "error") => void;
+  toast: (message: string, type?: "success" | "error", action?: { label: string; run: () => void }) => void;
+  /** Record an action that can be undone (button ↶, Ctrl+Z, or the toast's « Annuler »). */
+  pushUndo: (label: string, undo: () => Promise<void>) => void;
+  undo: () => Promise<void>;
+  undoLabel: string | null;
   confirm: (opts: ConfirmOptions) => Promise<boolean>;
 }
+
+/** Fired after an undo so pages reload what they display. */
+export const UNDO_EVENT = "sateach:undone";
 
 const Ctx = createContext<VaultContextValue | null>(null);
 
@@ -37,7 +44,7 @@ export function useVault(): VaultContextValue {
   return v;
 }
 
-interface Toast { id: number; message: string; type: "success" | "error"; }
+interface Toast { id: number; message: string; type: "success" | "error"; action?: { label: string; run: () => void }; }
 
 export function VaultProvider({ vaultPath, children }: { vaultPath: string; children: ReactNode }) {
   const [domains, setDomains] = useState<Domain[]>([]);
@@ -58,11 +65,49 @@ export function VaultProvider({ vaultPath, children }: { vaultPath: string; chil
 
   useEffect(() => { void reload(); }, [reload]);
 
-  const toast = useCallback((message: string, type: "success" | "error" = "success") => {
+  const toast = useCallback((message: string, type: "success" | "error" = "success", action?: { label: string; run: () => void }) => {
     const id = ++toastId.current;
-    setToasts((t) => [...t, { id, message, type }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
+    setToasts((t) => [...t, { id, message, type, action }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 6000 : 3000);
   }, []);
+
+  // Undo stack (last 30 actions of this session).
+  const undoStack = useRef<{ label: string; undo: () => Promise<void> }[]>([]);
+  const [undoLabel, setUndoLabel] = useState<string | null>(null);
+
+  const undo = useCallback(async () => {
+    const last = undoStack.current.pop();
+    setToasts((t) => t.filter((x) => !x.action));
+    setUndoLabel(undoStack.current[undoStack.current.length - 1]?.label ?? null);
+    if (!last) return;
+    try {
+      await last.undo();
+      await reload();
+      window.dispatchEvent(new Event(UNDO_EVENT));
+      toast(`Annulé : ${last.label}`);
+    } catch (e) {
+      toast(`Impossible d'annuler : ${e}`, "error");
+    }
+  }, [toast, reload]);
+
+  const pushUndo = useCallback((label: string, fn: () => Promise<void>) => {
+    undoStack.current = [...undoStack.current.slice(-29), { label, undo: fn }];
+    setUndoLabel(label);
+    toast(label, "success", { label: "Annuler", run: () => void undo() });
+  }, [toast, undo]);
+
+  // Ctrl/Cmd+Z outside text fields (inside them, the field's own undo applies).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z" || e.shiftKey) return;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
+      e.preventDefault();
+      void undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo]);
 
   const confirm = useCallback(
     (opts: ConfirmOptions) => new Promise<boolean>((resolve) => setPending({ ...opts, resolve })),
@@ -77,7 +122,7 @@ export function VaultProvider({ vaultPath, children }: { vaultPath: string; chil
   const domainById = new Map(domains.map((d) => [d.id, d]));
 
   return (
-    <Ctx.Provider value={{ vaultPath, loaded, domains, domainById, slots, week, reload, toast, confirm }}>
+    <Ctx.Provider value={{ vaultPath, loaded, domains, domainById, slots, week, reload, toast, confirm, pushUndo, undo, undoLabel }}>
       {children}
 
       {pending && (
@@ -113,6 +158,14 @@ export function VaultProvider({ vaultPath, children }: { vaultPath: string; chil
               )}
             >
               <span className="flex-1">{t.message}</span>
+              {t.action && (
+                <button
+                  onClick={() => { t.action!.run(); setToasts((all) => all.filter((x) => x.id !== t.id)); }}
+                  className="shrink-0 rounded-md bg-background/15 px-2 py-0.5 text-xs font-semibold underline-offset-2 hover:underline"
+                >
+                  {t.action.label}
+                </button>
+              )}
               <button
                 onClick={() => setToasts((all) => all.filter((x) => x.id !== t.id))}
                 className="shrink-0 opacity-70 transition-opacity hover:opacity-100"

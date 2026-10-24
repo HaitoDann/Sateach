@@ -60,3 +60,22 @@ describe("computeVolumes", () => {
     expect(under[0]).toMatchObject({ planned: 90, delta: -210, status: "under" });
   });
 });
+
+import { computePeriods, holidayOn } from "./year";
+
+describe("programmation", () => {
+  const year = {
+    zone: "A" as const,
+    schoolStart: "2026-09-01",
+    schoolEnd: "2026-12-18",
+    holidays: [{ name: "Toussaint", start: "2026-10-17", end: "2026-11-01" }, { name: "Vide", start: "", end: "" }],
+  };
+  it("derives the périodes and their weeks from the holidays", () => {
+    expect(computePeriods(year)).toEqual([
+      { n: 1, start: "2026-09-01", end: "2026-10-16", weeks: 7 },
+      { n: 2, start: "2026-11-02", end: "2026-12-18", weeks: 7 },
+    ]);
+    expect(holidayOn(year, "2026-10-20")?.name).toBe("Toussaint");
+    expect(holidayOn(year, "2026-11-02")).toBeUndefined();
+  });
+});

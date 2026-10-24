@@ -24,10 +24,17 @@ sur la même base que Nilo : même ergonomie, mêmes composants, même système 
   « À venir ». Chaque évènement peut avoir un rappel (au début, 15 min, 1 h, la
   veille, une semaine avant) ; les rappels s'activent ou se désactivent d'un clic
   (notifications système, tant que Sat'each est ouvert).
-- **Mes cours** — l'archive des cours, rangée par domaine puis par séquence :
-  objectifs, déroulement, matériel, notes, niveau, et documents joints (copiés
-  dans le dossier `Cours/` du vault). Une séance détaillée du cahier journal
-  s'archive en un clic.
+- **Fiches de préparation** — sur le modèle papier : séquence, séance n/N, durée,
+  objectif, compétences, matériel, organisation, tableau des phases (durée et
+  organisation, matériel, déroulement + consignes, activité des élèves et
+  différenciation), bilan, images et documents. Ouverte depuis une séance du
+  cahier journal (créée et reliée en un clic). Impression / PDF.
+- **Séquences** — fiche de séquence (niveaux, nombre de séances, objectifs
+  généraux, attendus de fin de cycle, période, bilan) avec le tableau de ses
+  séances ; chaque ligne ouvre sa fiche de préparation.
+- **Programmation** — zone A/B/C, rentrée, vacances → les 5 périodes et leur
+  nombre de semaines ; pour chaque domaine et période, les notions abordées et
+  les séquences prévues. Les vacances s'ajoutent au calendrier en un clic.
 - **Domaines** — Français, Mathématiques, Questionner le monde, EPS, Arts
   plastiques, Musique, EMC, Anglais, chacun avec sa couleur. Nom et couleur
   modifiables, domaines ajoutables dans les Réglages.
@@ -41,7 +48,9 @@ sur la même base que Nilo : même ergonomie, mêmes composants, même système 
   séance comme faite, l'annuler pour ce jour (sortie, absence…), modifier son
   horaire pour ce jour uniquement, ajouter une séance ponctuelle, écrire les notes
   du jour, et **imprimer** la journée (A4). Enregistrement automatique.
-  Chaque séance se valide « Faite » ou « Non faite ».
+  Chaque séance se valide « Faite » ou « Non faite », se copie vers d'autres
+  jours (glisser sur la semaine), se masque (réaffichable) ou se supprime avec
+  confirmation. « Retour arrière » / Ctrl+Z annule la dernière action.
 
 ## Le vault
 
@@ -96,6 +105,6 @@ src/
                 domains.ts (domaines, volumes), time.ts, vault.ts (verrou, sauvegardes), store.ts (préférences)
   context/      VaultContext : domaines, séances, réglages, toasts, confirmations
   components/   Sidebar (rail d'icônes façon Nilo), WeekGrid, SessionDialog, journal/…
-  pages/        TimetablePage, JournalPage, CalendarPage, ArchivePage, VolumesPage, SettingsPage, VaultSelector
+  pages/        TimetablePage, JournalPage, CalendarPage, YearPage, SequencesPage, PrepsPage, VolumesPage, SettingsPage, VaultSelector
 src-tauri/      application Tauri (fenêtre sans bordure, verrou + sauvegardes en Rust)
 ```

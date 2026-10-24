@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarRange, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Eye, Plus, Printer } from "lucide-react";
+import { CalendarRange, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Eye, Plus, Printer, Sun } from "lucide-react";
+import UndoButton from "../components/common/UndoButton";
+import { Dialog } from "../components/ui/Dialog";
 import PageHeader from "../components/PageHeader";
 import SessionCard, { FLUSH_EVENT } from "../components/journal/SessionCard";
 import PrintSheet from "../components/journal/PrintSheet";
 import SessionDialog, { type SessionValues } from "../components/SessionDialog";
 import { Button } from "../components/ui/Button";
-import { useVault } from "../context/VaultContext";
+import { UNDO_EVENT, useVault } from "../context/VaultContext";
 import {
-  createOneOffSession, deleteJournalEntry, getEvents, saveArchiveItem, getDatesWithContent, getJournalDay, saveDayNotes, saveSessionFields,
+  copySessionTo, createOneOffSession, deleteJournalEntry, getEntryRow, getEvents, getDatesWithContent, getJournalDay, getYearSettings,
+  restoreEntryRow, saveDayNotes, savePrep, saveSessionFields,
 } from "../lib/db";
 import {
   DAY_SHORT, addDays, fmtDuration, fmtLongDate, fmtTime, fromDateKey, stepSchoolDay, toDateKey, weekdayIndex,
 } from "../lib/time";
-import type { CalendarEvent, DaySession, EntryFields, PageName } from "../lib/types";
+import type { CalendarEvent, DaySession, EntryFields, PageName, YearSettings } from "../lib/types";
+import { navFocus, sessionDrag } from "../lib/nav";
+import { blankPrep } from "./PrepsPage";
+import { holidayOn } from "../lib/year";
 import { cn } from "../lib/utils";
 import { useNow } from "../lib/useNow";
 import { EVENT_KINDS, fmtEventTime } from "../lib/events";
@@ -28,7 +34,7 @@ function initialDate(schoolDays: number[]): string {
 }
 
 export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) => void }) {
-  const { domains, domainById, slots, week, toast, confirm } = useVault();
+  const { domains, domainById, slots, week, toast, confirm, pushUndo } = useVault();
   const [date, setDate] = useState(() => initialDate(week.days));
   const [sessions, setSessions] = useState<DaySession[]>([]);
   const [notes, setNotes] = useState("");
@@ -37,6 +43,9 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
   const [dialog, setDialog] = useState<{ kind: "new" } | { kind: "edit"; session: DaySession } | null>(null);
   const [withContent, setWithContent] = useState<Set<string>>(new Set());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [copying, setCopying] = useState<DaySession | null>(null);
+  const [dropDay, setDropDay] = useState<string | null>(null);
+  const [year, setYear] = useState<YearSettings | null>(null);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const d = fromDateKey(date);
@@ -60,6 +69,12 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
   }, [date, slots]);
 
   useEffect(() => { rememberedDate = date; void load(); }, [date, load]);
+  useEffect(() => { void getYearSettings().then(setYear); }, []);
+  useEffect(() => {
+    const onUndo = () => { void load(); };
+    window.addEventListener(UNDO_EVENT, onUndo);
+    return () => window.removeEventListener(UNDO_EVENT, onUndo);
+  }, [load]);
 
   const refreshWeekDots = useCallback(async () => {
     const from = weekKey;
@@ -109,52 +124,104 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
     if (loadedDate) void saveDayNotes(loadedDate, notes);
   }
 
-  async function patchSession(s: DaySession, patch: EntryFields, reload = true) {
+  /** Run a change on some journal rows, with an undo that puts them back. */
+  async function withUndo(label: string, ids: string[], op: () => Promise<void>) {
     try {
-      await saveSessionFields(date, s, patch);
-      if (reload) await load();
-      else setSessions((all) => all.map((x) => (x.key === s.key ? { ...x, ...patch } as DaySession : x)));
+      const before = await Promise.all(ids.map(async (id) => [id, await getEntryRow(id)] as const));
+      await op();
+      pushUndo(label, async () => { for (const [id, row] of before) await restoreEntryRow(id, row); });
+      await load();
       void refreshWeekDots();
     } catch (e) {
       toast(`Enregistrement impossible : ${e}`, "error");
     }
   }
 
+  async function saveText(s: DaySession, patch: EntryFields) {
+    try {
+      await saveSessionFields(date, s, patch);
+      setSessions((all) => all.map((x) => (x.key === s.key ? { ...x, ...patch } as DaySession : x)));
+      void refreshWeekDots();
+    } catch (e) {
+      toast(`Enregistrement impossible : ${e}`, "error");
+    }
+  }
+
+  const titleOf = (s: DaySession) => s.title || domainById.get(s.domain_id ?? "")?.name || "Séance";
+
+  function patchSession(s: DaySession, patch: EntryFields, label: string) {
+    return withUndo(label, [s.entryId], () => saveSessionFields(date, s, patch));
+  }
+
   async function saveDialog(v: SessionValues) {
     if (!dialog) return;
     if (dialog.kind === "new") {
-      await createOneOffSession(date, { title: v.title, domain_id: v.domain_id, start_min: v.start_min, end_min: v.end_min });
+      const id = await createOneOffSession(date, { title: v.title, domain_id: v.domain_id, start_min: v.start_min, end_min: v.end_min });
+      pushUndo(`Séance ajoutée : ${v.title || "séance"}`, () => deleteJournalEntry(id));
+      await load();
+      void refreshWeekDots();
     } else {
-      await saveSessionFields(date, dialog.session, { title: v.title, domain_id: v.domain_id, start_min: v.start_min, end_min: v.end_min });
+      await patchSession(dialog.session, { title: v.title, domain_id: v.domain_id, start_min: v.start_min, end_min: v.end_min }, "Séance modifiée pour ce jour");
     }
     setDialog(null);
-    await load();
-    void refreshWeekDots();
   }
 
-  async function removeOneOff(s: DaySession) {
+  async function remove(s: DaySession) {
     const ok = await confirm({
-      title: "Supprimer la séance ?",
-      message: `« ${s.title || "Séance"} » et ses notes seront supprimées de ce jour.`,
+      title: "Supprimer la séance de ce jour ?",
+      message: s.oneOff
+        ? `« ${titleOf(s)} » et ce que vous avez écrit dedans seront supprimés de ce jour. (L'emploi du temps n'est pas modifié.)`
+        : `« ${titleOf(s)} » n'apparaîtra plus ce jour-là. L'emploi du temps et les autres jours ne changent pas. Pour simplement la cacher temporairement, utilisez plutôt « Masquer ».`,
       confirmLabel: "Supprimer",
       destructive: true,
     });
     if (!ok) return;
-    await deleteJournalEntry(s.entryId);
     setDialog(null);
-    await load();
-    void refreshWeekDots();
+    await withUndo(`Séance supprimée : ${titleOf(s)}`, [s.entryId], () =>
+      s.oneOff ? deleteJournalEntry(s.entryId) : saveSessionFields(date, s, { hidden: 2 })
+    );
   }
 
-  async function archiveSession(s: DaySession) {
+  async function copyTo(s: DaySession, dates: string[]) {
     window.dispatchEvent(new Event(FLUSH_EVENT));
     await new Promise((r) => setTimeout(r, 120));
     const fresh = (await getJournalDay(date, slots)).sessions.find((x) => x.key === s.key) ?? s;
-    await saveArchiveItem({
-      domain_id: fresh.domain_id, folder: "", title: fresh.title || domainById.get(fresh.domain_id ?? "")?.name || "Séance",
-      level: "", objectives: fresh.objectives, progression: fresh.progression, materials: fresh.materials, notes: fresh.review,
+    const ids: string[] = [];
+    for (const d of dates) ids.push(await copySessionTo(d, fresh));
+    pushUndo(`« ${titleOf(s)} » copiée sur ${dates.length} jour${dates.length > 1 ? "s" : ""}`, async () => {
+      for (const id of ids) await deleteJournalEntry(id);
     });
-    toast("Séance archivée dans « Mes cours »");
+    void refreshWeekDots();
+  }
+
+  async function openPrep(s: DaySession) {
+    if (!s.prepId) {
+      window.dispatchEvent(new Event(FLUSH_EVENT));
+      await new Promise((r) => setTimeout(r, 120));
+      const fresh = (await getJournalDay(date, slots)).sessions.find((x) => x.key === s.key) ?? s;
+      const prepId = await savePrep({
+        sequence_id: null, domain_id: fresh.domain_id, title: titleOf(fresh), number: null,
+        duration_min: fresh.end_min - fresh.start_min, objective: fresh.objectives, skills: "", materials: fresh.materials,
+        organisation: "", review: fresh.review,
+        phases: fresh.progression.trim()
+          ? [{ phase: "", duration: "", materials: "", progression: fresh.progression, students: "" }]
+          : blankPrep().phases,
+      });
+      await saveSessionFields(date, fresh, { prep_id: prepId });
+      navFocus.prepId = prepId;
+    } else {
+      navFocus.prepId = s.prepId;
+    }
+    onNavigate("preps");
+  }
+
+  function onWeekDrop(e: React.DragEvent, k: string) {
+    setDropDay(null);
+    const s = sessions.find((x) => x.key === sessionDrag.key);
+    sessionDrag.key = null;
+    if (!s || k === date) return;
+    e.preventDefault();
+    void copyTo(s, [k]);
   }
 
   function print() {
@@ -163,19 +230,21 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
     setTimeout(() => window.print(), 150);
   }
 
-  const visible = sessions.filter((s) => !s.hidden);
-  const hidden = sessions.filter((s) => s.hidden);
-  const lessons = visible.filter((s) => s.domain_id && domainById.has(s.domain_id));
-  const allExpanded = lessons.length > 0 && lessons.every((s) => expanded.has(s.key));
+  const visible = sessions.filter((s) => s.hidden !== 2);
+  const removed = sessions.filter((s) => s.hidden === 2);
+  const active = visible.filter((s) => s.hidden === 0);
+  const lessons = active.filter((s) => s.domain_id && domainById.has(s.domain_id));
+  const holiday = holidayOn(year, date);
+  const allExpanded = active.length > 0 && active.every((s) => expanded.has(s.key));
 
   const dayVolumes = useMemo(() => {
     const m = new Map<string, number>();
-    for (const s of visible) {
+    for (const s of active) {
       if (!s.domain_id || !domainById.has(s.domain_id)) continue;
       m.set(s.domain_id, (m.get(s.domain_id) ?? 0) + s.end_min - s.start_min);
     }
     return [...m.entries()].map(([id, min]) => ({ domain: domainById.get(id)!, min })).sort((a, b) => b.min - a.min);
-  }, [visible, domainById]);
+  }, [active, domainById]);
   const dayTotal = dayVolumes.reduce((a, v) => a + v.min, 0);
   const doneCount = lessons.filter((s) => s.done === 1).length;
   const notDoneCount = lessons.filter((s) => s.done === 2).length;
@@ -191,6 +260,7 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
   return (
     <div className="flex h-full flex-col">
       <PageHeader title="Cahier journal">
+        <UndoButton />
         <div className="flex items-center rounded-md border border-border">
           <button onClick={() => go(-1)} className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground" title="Jour précédent (←)">
             <ChevronLeft size={16} />
@@ -231,9 +301,9 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
                     : `${lessons.length} séance${lessons.length > 1 ? "s" : ""} · ${fmtDuration(dayTotal)}${doneCount ? ` · ${doneCount} faite${doneCount > 1 ? "s" : ""}` : ""}${notDoneCount ? ` · ${notDoneCount} non faite${notDoneCount > 1 ? "s" : ""}` : ""}`}
                 </p>
               </div>
-              {lessons.length > 0 && (
+              {active.length > 0 && (
                 <button
-                  onClick={() => setExpanded(allExpanded ? new Set() : new Set(lessons.map((s) => s.key)))}
+                  onClick={() => setExpanded(allExpanded ? new Set() : new Set(active.map((s) => s.key)))}
                   className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   {allExpanded ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
@@ -241,6 +311,12 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
                 </button>
               )}
             </div>
+
+            {holiday && (
+              <div className="mb-4 flex items-center gap-2 rounded-xl border border-brand-300/60 bg-accent px-4 py-2.5 text-sm text-accent-foreground">
+                <Sun size={15} /> {holiday.name} — pas de classe (voir la programmation).
+              </div>
+            )}
 
             {loadedDate === date && (
               <div className="space-y-2">
@@ -252,13 +328,15 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
                     domain={s.domain_id ? domainById.get(s.domain_id) : undefined}
                     expanded={expanded.has(s.key)}
                     onToggle={() => toggle(s.key)}
-                    onSaveText={(patch) => patchSession(s, patch, false)}
-                    onSetDone={(v) => patchSession(s, { done: v })}
-                    onArchive={() => void archiveSession(s)}
-                    live={isToday && s.start_min <= nowMin && nowMin < s.end_min}
-                    onHide={() => s.oneOff ? removeOneOff(s) : patchSession(s, { hidden: 1 })}
-                    onEditTime={() => setDialog({ kind: "edit", session: s })}
-                    onDelete={s.oneOff ? () => removeOneOff(s) : undefined}
+                    onSaveText={(patch) => saveText(s, patch)}
+                    onSetDone={(v) => patchSession(s, { done: v }, v === 1 ? `« ${titleOf(s)} » faite` : v === 2 ? `« ${titleOf(s)} » non faite` : "Validation retirée")}
+                    live={isToday && s.hidden === 0 && s.start_min <= nowMin && nowMin < s.end_min}
+                    onEdit={() => setDialog({ kind: "edit", session: s })}
+                    onCopy={() => setCopying(s)}
+                    onPrep={() => void openPrep(s)}
+                    onHide={() => patchSession(s, { hidden: 1 }, `« ${titleOf(s)} » masquée pour ce jour`)}
+                    onUnhide={() => patchSession(s, { hidden: 0 }, `« ${titleOf(s)} » réaffichée`)}
+                    onDelete={() => void remove(s)}
                   />
                 ))}
 
@@ -286,17 +364,17 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
                   Ajouter une séance pour ce jour
                 </button>
 
-                {hidden.length > 0 && (
+                {removed.length > 0 && (
                   <div className="pt-4">
-                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Annulées ce jour-là</div>
-                    {hidden.map((s) => {
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">Supprimées de ce jour</div>
+                    {removed.map((s) => {
                       const dom = s.domain_id ? domainById.get(s.domain_id) : undefined;
                       return (
                         <div key={s.key} className="flex items-center gap-3 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted/60">
                           <span className="w-[92px] shrink-0 tabular-nums text-xs">{fmtTime(s.start_min)} – {fmtTime(s.end_min)}</span>
                           <span className="h-2 w-2 shrink-0 rounded-full opacity-60" style={{ backgroundColor: dom?.color ?? "var(--border)" }} />
-                          <span className="flex-1 truncate line-through">{s.title || dom?.name || "Séance"}</span>
-                          <button onClick={() => patchSession(s, { hidden: 0 })} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs hover:bg-background hover:text-foreground">
+                          <span className="flex-1 truncate line-through">{titleOf(s)}</span>
+                          <button onClick={() => patchSession(s, { hidden: 0 }, `« ${titleOf(s)} » rétablie`)} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs hover:bg-background hover:text-foreground">
                             <Eye size={12} /> Rétablir
                           </button>
                         </div>
@@ -313,6 +391,7 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
         <aside className="w-80 shrink-0 space-y-6 overflow-y-auto border-l border-border px-5 py-6">
           <section>
             <h3 className="mb-2 text-xs font-medium text-muted-foreground">Semaine</h3>
+            <p className="mb-2 text-[11px] text-muted-foreground/80">Glissez une séance (poignée ⋮⋮) sur un jour pour la copier.</p>
             <div className="flex gap-1">
               {weekDates.map((wd) => {
                 const k = toDateKey(wd);
@@ -322,9 +401,13 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
                   <button
                     key={k}
                     onClick={() => jump(k)}
+                    onDragOver={(e) => { if (sessionDrag.key && k !== date) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropDay(k); } }}
+                    onDragLeave={() => setDropDay(null)}
+                    onDrop={(e) => onWeekDrop(e, k)}
                     className={cn(
                       "flex flex-1 flex-col items-center rounded-lg py-1.5 transition-colors",
-                      selected ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+                      selected ? "bg-primary text-primary-foreground" : "hover:bg-muted",
+                      dropDay === k && "bg-accent ring-2 ring-primary"
                     )}
                   >
                     <span className={cn("text-[10px]", selected ? "text-primary-foreground/80" : "text-muted-foreground")}>{DAY_SHORT[weekdayIndex(wd)]}</span>
@@ -393,19 +476,92 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
 
       {dialog && (
         <SessionDialog
-          heading={dialog.kind === "new" ? "Séance ponctuelle" : dialog.session.slotId ? "Modifier pour ce jour uniquement" : "Modifier la séance"}
+          heading={dialog.kind === "new" ? "Séance pour ce jour uniquement" : "Modifier pour ce jour uniquement (l'emploi du temps ne change pas)"}
           initial={
             dialog.kind === "new"
               ? { title: "", domain_id: domains[0]?.id ?? null, start_min: 13 * 60 + 30, end_min: 14 * 60 + 15, days: [] }
               : { title: dialog.session.title, domain_id: dialog.session.domain_id, start_min: dialog.session.start_min, end_min: dialog.session.end_min, days: [] }
           }
           onSave={saveDialog}
-          onDelete={dialog.kind === "edit" && dialog.session.oneOff ? () => removeOneOff(dialog.session) : undefined}
+          onDelete={dialog.kind === "edit" ? () => remove(dialog.session) : undefined}
+          deleteLabel="Supprimer de ce jour"
           onClose={() => setDialog(null)}
+        />
+      )}
+
+      {copying && (
+        <CopyDialog
+          session={copying}
+          from={date}
+          schoolDays={week.days}
+          title={titleOf(copying)}
+          onCopy={(dates) => { void copyTo(copying, dates); setCopying(null); }}
+          onClose={() => setCopying(null)}
         />
       )}
 
       <PrintSheet dateLabel={dateLabel} notes={notes} sessions={sessions} domainById={domainById} />
     </div>
+  );
+}
+
+/** Pick the days to copy a séance to (same hour, same details). */
+function CopyDialog({ session, from, schoolDays, title, onCopy, onClose }: {
+  session: DaySession; from: string; schoolDays: number[]; title: string; onCopy: (dates: string[]) => void; onClose: () => void;
+}) {
+  // The next 3 weeks of school days.
+  const days: Date[] = [];
+  let cur = fromDateKey(from);
+  for (let i = 0; i < 15; i++) { cur = stepSchoolDay(cur, 1, schoolDays); days.push(cur); }
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const toggle = (k: string) => setPicked((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const thisWeek = days.filter((d) => toDateKey(addDays(d, -weekdayIndex(d))) === toDateKey(addDays(fromDateKey(from), -weekdayIndex(fromDateKey(from))))).map(toDateKey);
+  const perWeek = Math.max(1, schoolDays.length || 5);
+
+  return (
+    <Dialog
+      title={`Copier « ${title} »`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+          <Button size="sm" className="gap-1.5" disabled={picked.size === 0} onClick={() => onCopy([...picked].sort())}>
+            <Copy size={13} /> Copier sur {picked.size} jour{picked.size > 1 ? "s" : ""}
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-sm text-muted-foreground">
+        Même horaire ({fmtTime(session.start_min)} – {fmtTime(session.end_min)}) et même contenu. L'emploi du temps n'est pas modifié.
+      </p>
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {thisWeek.length > 0 && <QuickBtn label="Le reste de la semaine" onClick={() => setPicked(new Set(thisWeek))} />}
+        <QuickBtn label={`Les ${perWeek} prochains jours`} onClick={() => setPicked(new Set(days.slice(0, perWeek).map(toDateKey)))} />
+        <QuickBtn label="Les 2 prochaines semaines" onClick={() => setPicked(new Set(days.slice(0, perWeek * 2).map(toDateKey)))} />
+        {picked.size > 0 && <QuickBtn label="Tout décocher" onClick={() => setPicked(new Set())} />}
+      </div>
+      <div className="grid grid-cols-5 gap-1.5">
+        {days.map((d) => {
+          const k = toDateKey(d);
+          const on = picked.has(k);
+          return (
+            <button key={k} onClick={() => toggle(k)}
+              className={cn("flex flex-col items-center rounded-lg border py-1.5 text-xs transition-colors",
+                on ? "border-transparent bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:bg-muted")}>
+              <span>{DAY_SHORT[weekdayIndex(d)]}</span>
+              <span className="text-sm font-medium tabular-nums">{d.getDate()}/{d.getMonth() + 1}</span>
+            </button>
+          );
+        })}
+      </div>
+    </Dialog>
+  );
+}
+
+function QuickBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="rounded-full border border-border px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+      {label}
+    </button>
   );
 }
