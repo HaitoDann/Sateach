@@ -85,6 +85,14 @@ export default function TimetablePage() {
     await reload();
   }
 
+  async function fill(slot: Slot, days: number[]) {
+    const free = days.filter((d) => !slots.some((x) => x.day === d && x.start_min === slot.start_min && x.end_min === slot.end_min && x.title === slot.title && x.domain_id === slot.domain_id));
+    if (free.length === 0) return;
+    await withUndo(`Séance répétée sur ${free.length} jour${free.length > 1 ? "s" : ""}`, async () => {
+      for (const day of free) await createSlot({ day, start_min: slot.start_min, end_min: slot.end_min, domain_id: slot.domain_id, title: slot.title });
+    });
+  }
+
   async function move(id: string, patch: Pick<Slot, "day" | "start_min" | "end_min">) {
     await withUndo("Séance déplacée", () => updateSlot(id, patch));
     await reload();
@@ -136,6 +144,7 @@ export default function TimetablePage() {
             onEdit={(slot) => setEditing({ kind: "edit", slot })}
             onChange={move}
             onDropDomain={dropDomain}
+            onFill={fill}
           />
         )}
         {visibleSlots.length === 0 && week.days.length > 0 && (

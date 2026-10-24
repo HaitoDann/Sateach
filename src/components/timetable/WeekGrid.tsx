@@ -40,7 +40,8 @@ export function layoutColumn(slots: Slot[]): Laid[] {
 type DragOp =
   | { kind: "move"; id: string; offset: number; dur: number; originX: number; originY: number; moved: boolean }
   | { kind: "resize"; id: string; start: number; day: number }
-  | { kind: "create"; day: number; anchor: number; originY: number; moved: boolean };
+  | { kind: "create"; day: number; anchor: number; originY: number; moved: boolean }
+  | { kind: "fill"; id: string; day: number };
 
 type Draft = { id: string; day: number; start: number; end: number };
 
@@ -55,13 +56,18 @@ interface Props {
   onChange: (id: string, patch: Pick<Slot, "day" | "start_min" | "end_min">) => void;
   /** A domain pastille (or the "pause" one, null) dropped on the grid. */
   onDropDomain: (domainId: string | null, day: number, start: number, end: number) => void;
+  /** Excel-like fill: repeat `slot` on `days`. */
+  onFill: (slot: Slot, days: number[]) => void;
 }
 
 /** Set by the legend pastilles while they are dragged (dataTransfer can't be
  *  read during dragover). `undefined` = nothing being dragged. */
 export const pastilleDrag: { domainId: string | null | undefined; duration: number } = { domainId: undefined, duration: 45 };
 
-export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, onCreate, onEdit, onChange, onDropDomain }: Props) {
+export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, onCreate, onEdit, onChange, onDropDomain, onFill }: Props) {
+  const [fillTo, setFillTo] = useState<{ id: string; from: number; to: number } | null>(null);
+  const fillRef = useRef(fillTo);
+  fillRef.current = fillTo;
   const now = useNow();
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const todayDay = weekdayIndex(now);
@@ -126,6 +132,14 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
     listen();
   }
 
+  function beginFill(e: React.PointerEvent, s: Slot) {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    dragRef.current = { kind: "fill", id: s.id, day: s.day };
+    setFillTo({ id: s.id, from: s.day, to: s.day });
+    listen();
+  }
+
   function beginResize(e: React.PointerEvent, s: Slot) {
     if (e.button !== 0) return;
     e.stopPropagation();
@@ -148,6 +162,9 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
       if (!op.moved) return;
       const start = Math.max(dayStart, Math.min(dayEnd - op.dur, snap(minAt(e.clientY) + op.offset, SNAP)));
       setDraftBoth({ id: op.id, day: dayAt(e.clientX), start, end: start + op.dur });
+    } else if (op.kind === "fill") {
+      const to = dayAt(e.clientX);
+      if (!fillRef.current || fillRef.current.to !== to) setFillTo({ id: op.id, from: op.day, to });
     } else if (op.kind === "resize") {
       const end = Math.max(op.start + SNAP, clamp(snap(minAt(e.clientY), SNAP)));
       setDraftBoth({ id: op.id, day: op.day, start: op.start, end });
@@ -169,6 +186,16 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
     dragRef.current = null;
     setDraftBoth(null);
     if (!op) return;
+    if (op.kind === "fill") {
+      const f = fillRef.current;
+      setFillTo(null);
+      const s = slots.find((x) => x.id === op.id);
+      if (!f || !s) return;
+      const [a, b] = [Math.min(days.indexOf(f.from), days.indexOf(f.to)), Math.max(days.indexOf(f.from), days.indexOf(f.to))];
+      const targets = days.slice(a, b + 1).filter((d) => d !== f.from);
+      if (targets.length) onFill(s, targets);
+      return;
+    }
     if (op.kind === "move") {
       if (!op.moved) {
         const s = slots.find((x) => x.id === op.id);
@@ -289,6 +316,7 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
                       live={d === todayDay && slot.start_min <= nowMin && nowMin < slot.end_min}
                       onPointerDown={(e) => beginMove(e, slot)}
                       onResizeDown={(e) => beginResize(e, slot)}
+                      onFillDown={(e) => beginFill(e, slot)}
                     />
                   );
                 })}
@@ -335,6 +363,20 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
                   </div>
                 )}
 
+                {fillTo && d !== fillTo.from &&
+                  days.indexOf(d) >= Math.min(days.indexOf(fillTo.from), days.indexOf(fillTo.to)) &&
+                  days.indexOf(d) <= Math.max(days.indexOf(fillTo.from), days.indexOf(fillTo.to)) && (() => {
+                    const s = slots.find((x) => x.id === fillTo.id);
+                    if (!s) return null;
+                    const color = s.domain_id ? domainById.get(s.domain_id)?.color : undefined;
+                    return (
+                      <div className="pointer-events-none absolute inset-x-1 z-30 rounded-lg border-2 border-dashed px-1.5 py-0.5 text-[11px] font-medium text-foreground"
+                        style={{ top: y(s.start_min), height: (s.end_min - s.start_min) * ppm, borderColor: color ?? "var(--muted-foreground)", backgroundColor: color ? withAlpha(color, 0.14) : "var(--muted)" }}>
+                        + {s.title || (s.domain_id ? domainById.get(s.domain_id)?.name : "")}
+                      </div>
+                    );
+                  })()}
+
                 {draft && draft.id === "__new" && draft.day === d && (
                   <div
                     className="pointer-events-none absolute inset-x-1 z-30 rounded-lg border-2 border-dashed border-primary bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-foreground"
@@ -353,7 +395,7 @@ export default function WeekGrid({ days, dayStart, dayEnd, slots, domainById, on
 }
 
 function SlotCard({
-  slot, domain, start, end, top, height, lane, lanes, dragging, live, onPointerDown, onResizeDown,
+  slot, domain, start, end, top, height, lane, lanes, dragging, live, onPointerDown, onResizeDown, onFillDown,
 }: {
   slot: Slot;
   domain?: Domain;
@@ -367,6 +409,7 @@ function SlotCard({
   live?: boolean;
   onPointerDown?: (e: React.PointerEvent) => void;
   onResizeDown?: (e: React.PointerEvent) => void;
+  onFillDown?: (e: React.PointerEvent) => void;
 }) {
   const color = domain?.color;
   const title = slot.title.trim() || domain?.name || "Séance";
@@ -418,6 +461,13 @@ function SlotCard({
             <div className="truncate tabular-nums text-muted-foreground">{fmtTime(start)} · {fmtDuration(end - start)}</div>
           )}
         </>
+      )}
+      {onFillDown && (
+        <div
+          onPointerDown={onFillDown}
+          title="Glisser vers les autres jours pour répéter cette séance (comme dans Excel)"
+          className="absolute bottom-0.5 right-0.5 z-20 hidden h-2.5 w-2.5 cursor-crosshair rounded-sm border-2 border-card bg-primary group-hover:block"
+        />
       )}
       {onResizeDown && (
         <div

@@ -79,3 +79,42 @@ describe("programmation", () => {
     expect(holidayOn(year, "2026-11-02")).toBeUndefined();
   });
 });
+
+import { parseCalendar, schoolYearOf } from "./schoolCalendar";
+
+describe("calendrier scolaire officiel", () => {
+  const rec = (description: string, start: string, end: string, zones = "Zone A", population = "-") =>
+    ({ description, start_date: start, end_date: end, zones, population });
+  it("reads rentrée, holidays (last day off) and summer from the open data", () => {
+    const r = parseCalendar([
+      rec("Rentrée scolaire des enseignants", "2026-08-30T22:00:00+00:00", "2026-08-30T22:00:00+00:00", "Zone A", "Enseignants"),
+      rec("Rentrée scolaire des élèves", "2026-08-31T22:00:00+00:00", "2026-08-31T22:00:00+00:00", "Zone A", "Élèves"),
+      rec("Vacances de la Toussaint", "2026-10-16T22:00:00+00:00", "2026-11-01T23:00:00+00:00"),
+      rec("Vacances de la Toussaint", "2026-10-16T22:00:00+00:00", "2026-11-01T23:00:00+00:00"), // another académie
+      rec("Vacances d'Hiver", "2027-02-05T23:00:00+00:00", "2027-02-21T23:00:00+00:00", "Zone C"),
+      rec("Vacances de Noël", "2026-12-18T23:00:00+00:00", "2027-01-03T23:00:00+00:00"),
+      rec("Vacances d'Été", "2027-07-02T22:00:00+00:00", "2027-08-31T22:00:00+00:00"),
+    ], "A");
+    expect(r).toEqual({
+      schoolStart: "2026-09-01",
+      schoolEnd: "2027-07-02",
+      holidays: [
+        { name: "Vacances de la Toussaint", start: "2026-10-17", end: "2026-11-01" },
+        { name: "Vacances de Noël", start: "2026-12-19", end: "2027-01-03" },
+      ],
+    });
+    expect(schoolYearOf("2026-09-01")).toBe("2026-2027");
+    expect(schoolYearOf("2027-03-01")).toBe("2026-2027");
+  });
+});
+
+import { periodWeeks } from "./year";
+
+describe("semaines d'une période", () => {
+  it("splits a période into S1…Sn", () => {
+    const w = periodWeeks({ n: 1, start: "2026-09-01", end: "2026-10-16", weeks: 7 });
+    expect(w.length).toBe(7);
+    expect(w[0]).toEqual({ n: 1, start: "2026-09-01", end: "2026-09-04" });
+    expect(w[6]).toEqual({ n: 7, start: "2026-10-12", end: "2026-10-16" });
+  });
+});

@@ -11,7 +11,14 @@ export const DEFAULT_DOMAINS: { name: string; color: string; target_minutes: num
   { name: "Musique", color: "#8b5cf6", target_minutes: 60 },
   { name: "EMC", color: "#b8663a", target_minutes: 30 },
   { name: "Anglais", color: "#d4a800", target_minutes: 90 },
+  { name: "Rituels", color: "#64748b", target_minutes: 0 },
 ];
+
+/** Default dossiers (sous-domaines), taken from Camille's programmation. */
+export const DEFAULT_SUBJECTS: Record<string, string[]> = {
+  "français": ["Grammaire", "Conjugaison", "Écriture", "Vocabulaire", "Grapho-phonèmes", "Orthographe", "Lecture + compréhension"],
+  "mathématiques": ["Nombres", "Calcul", "Calcul mental", "Grandeurs et mesures", "Espace et géométrie", "Problèmes"],
+};
 
 /** Palette offered when recoloring or adding a domain. */
 export const DOMAIN_PALETTE = [
@@ -37,6 +44,7 @@ const SUGGESTIONS: Record<string, string[]> = {
   "musique": ["Chant", "Écoute musicale", "Pratique rythmique", "Chorale"],
   "emc": ["Débat", "Conseil de classe", "Vivre ensemble"],
   "anglais": ["Anglais", "Rituels en anglais", "Comptines", "Album en anglais"],
+  "rituels": ["Rituel du matin", "Date et météo", "Appel", "Calcul mental", "Phrase du jour", "Lecture offerte"],
 };
 
 export const OFF_DOMAIN_SUGGESTIONS = ["Récréation", "Pause méridienne", "Accueil", "APC", "Bibliothèque", "Sortie"];

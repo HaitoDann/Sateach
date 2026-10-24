@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- Dossiers par domaine (Français › Grammaire, Conjugaison… ; Mathématiques › Nombres, Calcul…) pour ranger les fiches et les séquences.
+- Programmation refaite sur le modèle de Camille : une période à la fois, par domaine, chaque dossier avec ses semaines S1, S2… (dates affichées), impression identique au document.
+- Vacances automatiques : « Remplir automatiquement » charge le calendrier officiel de la zone (Internet nécessaire).
+- Répéter une séance comme dans Excel : la petite poignée d'une séance se tire vers les autres jours (emploi du temps et vue Semaine du cahier journal).
+- Cahier journal : vue Semaine (plusieurs jours côte à côte) et clic droit › Copier / Coller.
+- Nouveau domaine « Rituels ».
+- Bilan coloré d'une séance : vert (à réutiliser), jaune (à modifier), rouge (à revoir), repris sur sa fiche de préparation.
+
 ## 0.3.0
 
 - Cahier journal : chaque séance a un menu clair (modifier pour ce jour, copier vers d'autres jours, fiche de préparation, masquer, supprimer avec confirmation). Une séance masquée reste visible en grisé avec « Réafficher ».

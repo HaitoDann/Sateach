@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarRange, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Eye, Plus, Printer, Sun } from "lucide-react";
+import { CalendarRange, ClipboardPaste, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Eye, Plus, Printer, Sun } from "lucide-react";
 import UndoButton from "../components/common/UndoButton";
+import { SegmentedControl } from "../components/ui/SegmentedControl";
 import { Dialog } from "../components/ui/Dialog";
 import PageHeader from "../components/PageHeader";
 import SessionCard, { FLUSH_EVENT } from "../components/journal/SessionCard";
@@ -9,14 +10,16 @@ import SessionDialog, { type SessionValues } from "../components/SessionDialog";
 import { Button } from "../components/ui/Button";
 import { UNDO_EVENT, useVault } from "../context/VaultContext";
 import {
-  copySessionTo, createOneOffSession, deleteJournalEntry, getEntryRow, getEvents, getDatesWithContent, getJournalDay, getYearSettings,
+  copySessionTo, createOneOffSession, rateSession, deleteJournalEntry, getEntryRow, getEvents, getDatesWithContent, getJournalDay, getYearSettings,
   restoreEntryRow, saveDayNotes, savePrep, saveSessionFields,
 } from "../lib/db";
 import {
   DAY_SHORT, addDays, fmtDuration, fmtLongDate, fmtTime, fromDateKey, stepSchoolDay, toDateKey, weekdayIndex,
 } from "../lib/time";
 import type { CalendarEvent, DaySession, EntryFields, PageName, YearSettings } from "../lib/types";
-import { navFocus, sessionDrag } from "../lib/nav";
+import { navFocus, sessionClipboard, sessionDrag } from "../lib/nav";
+import { ratingOf } from "../components/common/Rating";
+import JournalWeek from "../components/journal/JournalWeek";
 import { blankPrep } from "./PrepsPage";
 import { holidayOn } from "../lib/year";
 import { cn } from "../lib/utils";
@@ -25,6 +28,7 @@ import { EVENT_KINDS, fmtEventTime } from "../lib/events";
 
 /** Remembered while the app is open, so switching views keeps the same day. */
 let rememberedDate: string | null = null;
+let rememberedView: "day" | "week" = "day";
 
 function initialDate(schoolDays: number[]): string {
   if (rememberedDate) return rememberedDate;
@@ -46,6 +50,10 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
   const [copying, setCopying] = useState<DaySession | null>(null);
   const [dropDay, setDropDay] = useState<string | null>(null);
   const [year, setYear] = useState<YearSettings | null>(null);
+  const [view, setView] = useState<"day" | "week">(() => rememberedView);
+  const [clip, setClip] = useState(sessionClipboard.current);
+  /** Bumped after each change so the week view reloads. */
+  const [version, setVersion] = useState(0);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const d = fromDateKey(date);
@@ -98,7 +106,13 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
 
   function go(dir: 1 | -1) {
     flushNotes();
-    setDate(toDateKey(stepSchoolDay(fromDateKey(date), dir, week.days)));
+    if (view === "week") setDate(toDateKey(addDays(fromDateKey(date), 7 * dir)));
+    else setDate(toDateKey(stepSchoolDay(fromDateKey(date), dir, week.days)));
+  }
+
+  function switchView(v: "day" | "week") {
+    rememberedView = v;
+    setView(v);
   }
 
   function jump(key: string) {
@@ -131,6 +145,7 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
       await op();
       pushUndo(label, async () => { for (const [id, row] of before) await restoreEntryRow(id, row); });
       await load();
+      setVersion((v) => v + 1);
       void refreshWeekDots();
     } catch (e) {
       toast(`Enregistrement impossible : ${e}`, "error");
@@ -149,8 +164,28 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
 
   const titleOf = (s: DaySession) => s.title || domainById.get(s.domain_id ?? "")?.name || "Séance";
 
-  function patchSession(s: DaySession, patch: EntryFields, label: string) {
-    return withUndo(label, [s.entryId], () => saveSessionFields(date, s, patch));
+  function patchSession(s: DaySession, patch: EntryFields, label: string, d = date) {
+    return withUndo(label, [s.entryId], () => saveSessionFields(d, s, patch));
+  }
+
+  function rate(s: DaySession, v: number, d = date) {
+    const r = ratingOf(v);
+    return withUndo(r ? `« ${titleOf(s)} » : ${r.label.toLowerCase()}` : "Bilan coloré retiré", [s.entryId], () => rateSession(d, s, v));
+  }
+
+  function clipboardCopy(s: DaySession, d = date) {
+    window.dispatchEvent(new Event(FLUSH_EVENT));
+    sessionClipboard.current = { date: d, key: s.key, title: titleOf(s) };
+    setClip(sessionClipboard.current);
+    toast(`« ${titleOf(s)} » copiée — clic droit › Coller sur un autre jour`);
+  }
+
+  async function paste(target: string) {
+    const c = sessionClipboard.current;
+    if (!c) return;
+    const src = (await getJournalDay(c.date, slots)).sessions.find((x) => x.key === c.key);
+    if (!src) { toast("La séance copiée n'existe plus", "error"); return; }
+    await copyTo(src, [target], c.date);
   }
 
   async function saveDialog(v: SessionValues) {
@@ -166,7 +201,7 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
     setDialog(null);
   }
 
-  async function remove(s: DaySession) {
+  async function remove(s: DaySession, d = date) {
     const ok = await confirm({
       title: "Supprimer la séance de ce jour ?",
       message: s.oneOff
@@ -178,16 +213,18 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
     if (!ok) return;
     setDialog(null);
     await withUndo(`Séance supprimée : ${titleOf(s)}`, [s.entryId], () =>
-      s.oneOff ? deleteJournalEntry(s.entryId) : saveSessionFields(date, s, { hidden: 2 })
+      s.oneOff ? deleteJournalEntry(s.entryId) : saveSessionFields(d, s, { hidden: 2 })
     );
   }
 
-  async function copyTo(s: DaySession, dates: string[]) {
+  async function copyTo(s: DaySession, dates: string[], from = date) {
     window.dispatchEvent(new Event(FLUSH_EVENT));
     await new Promise((r) => setTimeout(r, 120));
-    const fresh = (await getJournalDay(date, slots)).sessions.find((x) => x.key === s.key) ?? s;
+    const fresh = (await getJournalDay(from, slots)).sessions.find((x) => x.key === s.key) ?? s;
     const ids: string[] = [];
     for (const d of dates) ids.push(await copySessionTo(d, fresh));
+    if (dates.includes(date)) await load();
+    setVersion((v) => v + 1);
     pushUndo(`« ${titleOf(s)} » copiée sur ${dates.length} jour${dates.length > 1 ? "s" : ""}`, async () => {
       for (const id of ids) await deleteJournalEntry(id);
     });
@@ -261,8 +298,13 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
     <div className="flex h-full flex-col">
       <PageHeader title="Cahier journal">
         <UndoButton />
+        <SegmentedControl<"day" | "week">
+          options={[{ value: "day", label: "Jour" }, { value: "week", label: "Semaine" }]}
+          value={view}
+          onChange={switchView}
+        />
         <div className="flex items-center rounded-md border border-border">
-          <button onClick={() => go(-1)} className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground" title="Jour précédent (←)">
+          <button onClick={() => go(-1)} className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground" title={view === "week" ? "Semaine précédente" : "Jour précédent (←)"}>
             <ChevronLeft size={16} />
           </button>
           <button
@@ -271,7 +313,7 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
           >
             Aujourd'hui
           </button>
-          <button onClick={() => go(1)} className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground" title="Jour suivant (→)">
+          <button onClick={() => go(1)} className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground" title={view === "week" ? "Semaine suivante" : "Jour suivant (→)"}>
             <ChevronRight size={16} />
           </button>
         </div>
@@ -288,6 +330,23 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
         </Button>
       </PageHeader>
 
+      {view === "week" ? (
+        <JournalWeek
+          dates={weekDates.map(toDateKey)}
+          today={toDateKey(now)}
+          version={version}
+          clip={clip}
+          year={year}
+          titleOf={titleOf}
+          onOpenDay={(d) => { setDate(d); switchView("day"); }}
+          onCopy={(s, d) => clipboardCopy(s, d)}
+          onPaste={(d) => void paste(d)}
+          onFill={(s, from, dates) => void copyTo(s, dates, from)}
+          onSetDone={(s, d, v) => void patchSession(s, { done: v }, v === 1 ? `« ${titleOf(s)} » faite` : v === 2 ? `« ${titleOf(s)} » non faite` : "Validation retirée", d)}
+          onHide={(s, d) => void patchSession(s, { hidden: 1 }, `« ${titleOf(s)} » masquée pour ce jour`, d)}
+          onDelete={(s, d) => void remove(s, d)}
+        />
+      ) : (
       <div className="flex min-h-0 flex-1">
         {/* Day */}
         <div className="min-w-0 flex-1 overflow-y-auto">
@@ -337,6 +396,8 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
                     onHide={() => patchSession(s, { hidden: 1 }, `« ${titleOf(s)} » masquée pour ce jour`)}
                     onUnhide={() => patchSession(s, { hidden: 0 }, `« ${titleOf(s)} » réaffichée`)}
                     onDelete={() => void remove(s)}
+                    onRate={(v) => void rate(s, v)}
+                    onClipboardCopy={() => clipboardCopy(s)}
                   />
                 ))}
 
@@ -356,6 +417,15 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
                   </div>
                 )}
 
+                {clip && (
+                  <button
+                    onClick={() => void paste(date)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-primary/60 bg-accent/40 py-2.5 text-sm text-accent-foreground transition-colors hover:bg-accent"
+                  >
+                    <ClipboardPaste size={15} />
+                    Coller « {clip.title} » ici
+                  </button>
+                )}
                 <button
                   onClick={() => setDialog({ kind: "new" })}
                   className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-sm text-muted-foreground transition-colors hover:border-primary/60 hover:bg-accent/50 hover:text-accent-foreground"
@@ -473,6 +543,8 @@ export default function JournalPage({ onNavigate }: { onNavigate: (p: PageName) 
           )}
         </aside>
       </div>
+
+      )}
 
       {dialog && (
         <SessionDialog

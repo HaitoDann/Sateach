@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { AutoTextarea } from "../ui/AutoTextarea";
-import { Check, ChevronDown, X, Clock, Copy, Eye, EyeOff, FileText, GripVertical, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Check, ChevronDown, X, Clock, ClipboardCopy, Copy, Eye, EyeOff, FileText, GripVertical, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import Attachments from "../common/Attachments";
+import { RatingDot, RatingPicker } from "../common/Rating";
 import { sessionDrag } from "../../lib/nav";
 import type { DaySession, Domain, EntryFields } from "../../lib/types";
 import { fmtDuration, fmtTime } from "../../lib/time";
@@ -35,11 +36,14 @@ interface Props {
   onHide: () => void;
   onUnhide: () => void;
   onDelete: () => void;
+  onRate: (v: number) => void;
+  /** Clic droit › Copier. */
+  onClipboardCopy: () => void;
   index: number;
 }
 
 export default function SessionCard({
-  session, domain, expanded, onToggle, onSaveText, onSetDone, live, onEdit, onCopy, onPrep, onHide, onUnhide, onDelete, index,
+  session, domain, expanded, onToggle, onSaveText, onSetDone, live, onEdit, onCopy, onPrep, onHide, onUnhide, onDelete, onRate, onClipboardCopy, index,
 }: Props) {
   const [values, setValues] = useState<Record<TextField, string>>({
     objectives: session.objectives,
@@ -48,7 +52,7 @@ export default function SessionCard({
     review: session.review,
   });
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
-  const [menu, setMenu] = useState(false);
+  const [menu, setMenu] = useState<null | { x: number; y: number }>(null);
   const pending = useRef<EntryFields>({});
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveRef = useRef(onSaveText);
@@ -115,6 +119,7 @@ export default function SessionCard({
 
   return (
     <div
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY }); }}
       className={cn(
         "group rounded-xl border bg-card transition-shadow animate-item-in",
         expanded ? "border-border shadow-md" : "border-border/80 hover:shadow-sm",
@@ -146,6 +151,7 @@ export default function SessionCard({
         {/* Title + preview */}
         <button onClick={onToggle} className="min-w-0 flex-1 px-4 py-3 text-left">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <RatingDot value={session.rating} />
             <span className={cn("truncate font-medium text-foreground", session.done === 1 && "text-muted-foreground")}>{title}</span>
             <span
               className={cn("shrink-0 rounded-full px-2 py-px text-[11px] font-medium", neutral ? "bg-muted text-muted-foreground" : "text-foreground/80")}
@@ -213,25 +219,28 @@ export default function SessionCard({
             </button>
           </div>
 
-          {/* Menu with every action, labelled */}
-          <div className="relative">
-            <button onClick={() => setMenu((v) => !v)} title="Actions" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
-              <MoreHorizontal size={16} />
-            </button>
-            {menu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} />
-                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-border bg-card py-1 shadow-xl" onClick={() => setMenu(false)}>
-                  <MenuItem icon={<Pencil size={14} />} label="Modifier pour ce jour" hint="l'emploi du temps ne change pas" onClick={onEdit} />
-                  <MenuItem icon={<Copy size={14} />} label="Copier vers d'autres jours…" onClick={onCopy} />
-                  <MenuItem icon={<FileText size={14} />} label={session.prepId ? "Ouvrir la fiche de préparation" : "Créer la fiche de préparation"} onClick={onPrep} />
-                  <div className="my-1 h-px bg-border" />
-                  <MenuItem icon={<EyeOff size={14} />} label="Masquer pour ce jour" hint="réaffichable à tout moment" onClick={onHide} />
-                  <MenuItem icon={<Trash2 size={14} />} label="Supprimer de ce jour…" danger onClick={onDelete} />
-                </div>
-              </>
-            )}
-          </div>
+          {/* Menu with every action, labelled (also on right-click) */}
+          <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: r.right - 256, y: r.bottom + 4 }); }} title="Actions (ou clic droit)" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+            <MoreHorizontal size={16} />
+          </button>
+          {menu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+              <div
+                className="fixed z-50 w-64 rounded-lg border border-border bg-card py-1 shadow-xl"
+                style={{ left: Math.max(8, Math.min(menu.x, window.innerWidth - 270)), top: Math.min(menu.y, window.innerHeight - 300) }}
+                onClick={() => setMenu(null)}
+              >
+                <MenuItem icon={<ClipboardCopy size={14} />} label="Copier" hint="puis clic droit › Coller sur un autre jour" onClick={onClipboardCopy} />
+                <MenuItem icon={<Copy size={14} />} label="Copier vers d'autres jours…" onClick={onCopy} />
+                <MenuItem icon={<Pencil size={14} />} label="Modifier pour ce jour" hint="l'emploi du temps ne change pas" onClick={onEdit} />
+                <MenuItem icon={<FileText size={14} />} label={session.prepId ? "Ouvrir la fiche de préparation" : "Créer la fiche de préparation"} onClick={onPrep} />
+                <div className="my-1 h-px bg-border" />
+                <MenuItem icon={<EyeOff size={14} />} label="Masquer pour ce jour" hint="réaffichable à tout moment" onClick={onHide} />
+                <MenuItem icon={<Trash2 size={14} />} label="Supprimer de ce jour…" danger onClick={onDelete} />
+              </div>
+            </>
+          )}
 
           <button onClick={onToggle} title={expanded ? "Replier" : "Détailler"} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
             <ChevronDown size={16} className={cn("transition-transform duration-200", expanded && "rotate-180")} />
@@ -254,6 +263,10 @@ export default function SessionCard({
                 />
               </div>
             ))}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg bg-muted/40 px-3 py-2">
+            <span className="text-xs font-medium text-muted-foreground">Bilan de la séance</span>
+            <RatingPicker value={session.rating} onChange={onRate} />
           </div>
           <Attachments ownerType="entry" ownerId={session.entryId} className="mt-3" />
           <div className="mt-2 flex items-center justify-between gap-1.5 text-[11px] text-muted-foreground">

@@ -4,6 +4,7 @@ import { Check, Clock, Layers, Plus, Printer, Trash2 } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import Attachments from "../components/common/Attachments";
 import UndoButton from "../components/common/UndoButton";
+import SubjectSelect from "../components/common/SubjectSelect";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Select } from "../components/ui/Select";
@@ -19,7 +20,8 @@ import { blankPrep } from "./PrepsPage";
 type Filter = "all" | string;
 
 export default function SequencesPage({ onNavigate }: { onNavigate: (p: PageName) => void }) {
-  const { domains, domainById, confirm, pushUndo } = useVault();
+  const { domains, domainById, subjects, confirm, pushUndo } = useVault();
+  const subjectName = new Map(subjects.map((x) => [x.id, x.name]));
   const [sequences, setSequences] = useState<Sequence[]>([]);
   const [preps, setPreps] = useState<Prep[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
@@ -98,7 +100,10 @@ export default function SequencesPage({ onNavigate }: { onNavigate: (p: PageName
               {list.map((s) => (
                 <button key={s.id} onClick={() => setSelected(s.id)}
                   className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm", selected === s.id ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted")}>
-                  <span className="min-w-0 flex-1 truncate">{s.title}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {s.subject_id && subjectName.has(s.subject_id) && <span className="text-muted-foreground">{subjectName.get(s.subject_id)} › </span>}
+                    {s.title}
+                  </span>
                   {s.period && <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">P{s.period}</span>}
                   <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{preps.filter((p) => p.sequence_id === s.id).length}</span>
                 </button>
@@ -156,7 +161,7 @@ function SequenceEditor({ sequence, preps, onSaved, onDelete, onOpenPrep }: {
 
   async function addSession() {
     const n = Math.max(0, ...preps.map((p) => p.number ?? 0)) + 1;
-    const id = await savePrep(blankPrep({ sequence_id: sequence.id, domain_id: q.domain_id, number: n, title: `${q.title} — séance ${n}` }));
+    const id = await savePrep(blankPrep({ sequence_id: sequence.id, domain_id: q.domain_id, subject_id: q.subject_id ?? null, number: n, title: `${q.title} — séance ${n}` }));
     await onSaved();
     onOpenPrep(id);
   }
@@ -203,10 +208,12 @@ function SequenceEditor({ sequence, preps, onSaved, onDelete, onOpenPrep }: {
         </div>
         <div className="flex items-center gap-3 border-b border-border px-3 py-2">
           <span className={label}>Domaine :</span>
-          <Select value={q.domain_id ?? ""} onChange={(e) => set({ domain_id: e.target.value || null })} className="h-7 w-60 text-xs">
+          <Select value={q.domain_id ?? ""} onChange={(e) => set({ domain_id: e.target.value || null, subject_id: null })} className="h-7 w-60 text-xs">
             <option value="">Sans domaine</option>
             {domains.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </Select>
+          <span className={label}>Dossier :</span>
+          <SubjectSelect domainId={q.domain_id} value={q.subject_id ?? null} onChange={(subject_id) => set({ subject_id })} className="w-56" />
         </div>
         <div className="border-b border-border px-3 pt-2">
           <div className={cn(label, "underline")}>Objectifs généraux :</div>

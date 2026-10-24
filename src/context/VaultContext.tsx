@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
-import { getDomains, getSlots, getWeekSettings, DEFAULT_WEEK } from "../lib/db";
-import type { Domain, Slot, WeekSettings } from "../lib/types";
+import { getDomains, getSlots, getSubjects, getWeekSettings, DEFAULT_WEEK } from "../lib/db";
+import type { Domain, Slot, Subject, WeekSettings } from "../lib/types";
 import { Dialog } from "../components/ui/Dialog";
 import { Button } from "../components/ui/Button";
 import { cn } from "../lib/utils";
@@ -23,6 +23,8 @@ interface VaultContextValue {
   domains: Domain[];
   domainById: Map<string, Domain>;
   slots: Slot[];
+  /** Dossiers (sous-domaines) of every domain. */
+  subjects: Subject[];
   week: WeekSettings;
   reload: () => Promise<void>;
   toast: (message: string, type?: "success" | "error", action?: { label: string; run: () => void }) => void;
@@ -49,6 +51,7 @@ interface Toast { id: number; message: string; type: "success" | "error"; action
 export function VaultProvider({ vaultPath, children }: { vaultPath: string; children: ReactNode }) {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [week, setWeek] = useState<WeekSettings>(DEFAULT_WEEK);
   const [loaded, setLoaded] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -56,7 +59,8 @@ export function VaultProvider({ vaultPath, children }: { vaultPath: string; chil
   const toastId = useRef(0);
 
   const reload = useCallback(async () => {
-    const [d, s, w] = await Promise.all([getDomains(), getSlots(), getWeekSettings()]);
+    const [d, s, w, sub] = await Promise.all([getDomains(), getSlots(), getWeekSettings(), getSubjects()]);
+    setSubjects(sub);
     setDomains(d);
     setSlots(s);
     setWeek(w);
@@ -122,7 +126,7 @@ export function VaultProvider({ vaultPath, children }: { vaultPath: string; chil
   const domainById = new Map(domains.map((d) => [d.id, d]));
 
   return (
-    <Ctx.Provider value={{ vaultPath, loaded, domains, domainById, slots, week, reload, toast, confirm, pushUndo, undo, undoLabel }}>
+    <Ctx.Provider value={{ vaultPath, loaded, domains, domainById, slots, subjects, week, reload, toast, confirm, pushUndo, undo, undoLabel }}>
       {children}
 
       {pending && (

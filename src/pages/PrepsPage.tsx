@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, Check, Clock, CopyPlus, FileText, Layers, Plus, Printer, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Clock, CopyPlus, FileText, Folder, Layers, Plus, Printer, Search, Trash2, X } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import Attachments from "../components/common/Attachments";
 import UndoButton from "../components/common/UndoButton";
+import SubjectSelect from "../components/common/SubjectSelect";
+import { RatingDot, RatingPicker } from "../components/common/Rating";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Select } from "../components/ui/Select";
@@ -28,7 +30,7 @@ export function blankPrep(over: Partial<PrepInput> = {}): PrepInput {
 }
 
 export default function PrepsPage({ onNavigate }: { onNavigate: (p: PageName) => void }) {
-  const { domains, domainById, toast, confirm, pushUndo } = useVault();
+  const { domains, domainById, subjects, toast, confirm, pushUndo } = useVault();
   const [preps, setPreps] = useState<Prep[]>([]);
   const [sequences, setSequences] = useState<Sequence[]>([]);
   const [selected, setSelected] = useState<string | null>(() => navFocus.prepId);
@@ -55,14 +57,28 @@ export default function PrepsPage({ onNavigate }: { onNavigate: (p: PageName) =>
     (!domainFilter || p.domain_id === domainFilter) &&
     (!q || [p.title, p.objective, p.skills, seqById.get(p.sequence_id ?? "")?.title ?? ""].some((t) => t.toLowerCase().includes(q)))
   );
+  // Domaine › Dossier › fiches.
   const groups = useMemo(() => {
-    const m = new Map<string, Prep[]>();
+    const out: { key: string; domainId: string | null; label: string; items: Prep[] }[] = [];
+    const subjectName = new Map(subjects.map((x) => [x.id, x.name]));
+    const byKey = new Map<string, Prep[]>();
     for (const p of visible) {
-      const k = p.sequence_id && seqById.has(p.sequence_id) ? p.sequence_id : "";
-      m.set(k, [...(m.get(k) ?? []), p]);
+      const sub = p.subject_id && subjectName.has(p.subject_id) ? p.subject_id : "";
+      const k = `${p.domain_id ?? ""}|${sub}`;
+      byKey.set(k, [...(byKey.get(k) ?? []), p]);
     }
-    return [...m.entries()].sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : (seqById.get(a)!.title).localeCompare(seqById.get(b)!.title, "fr")));
-  }, [visible, seqById]);
+    const domOrder = [...domains.map((d) => d.id), ""];
+    for (const domId of domOrder) {
+      const subs = [...subjects.filter((x) => x.domain_id === domId).map((x) => x.id), ""];
+      for (const sub of subs) {
+        const items = byKey.get(`${domId}|${sub}`);
+        if (!items?.length) continue;
+        const domName = domainById.get(domId)?.name ?? "Sans domaine";
+        out.push({ key: `${domId}|${sub}`, domainId: domId || null, label: sub ? `${domName} › ${subjectName.get(sub)}` : domName, items });
+      }
+    }
+    return out;
+  }, [visible, subjects, domains, domainById]);
 
   async function create() {
     const id = await savePrep(blankPrep({ domain_id: domainFilter || domains[0]?.id || null }));
@@ -118,22 +134,21 @@ export default function PrepsPage({ onNavigate }: { onNavigate: (p: PageName) =>
           </div>
           <div className="flex-1 space-y-4 overflow-y-auto p-2">
             {visible.length === 0 && <p className="px-2 py-6 text-center text-xs text-muted-foreground">Aucune fiche. Créez-en une, ou depuis le cahier journal : menu ⋯ d'une séance › « Créer la fiche de préparation ».</p>}
-            {groups.map(([seqId, list]) => (
-              <div key={seqId || "none"}>
+            {groups.map((g) => (
+              <div key={g.key}>
                 <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground">
-                  <Layers size={11} /> {seqId ? seqById.get(seqId)!.title : "Hors séquence"}
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: domainById.get(g.domainId ?? "")?.color ?? "var(--border)" }} />
+                  {g.label.includes("›") ? <><Folder size={11} /> {g.label}</> : g.label}
                 </div>
-                {list.map((p) => {
-                  const dom = p.domain_id ? domainById.get(p.domain_id) : undefined;
-                  return (
-                    <button key={p.id} onClick={() => setSelected(p.id)}
-                      className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                        selected === p.id ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted")}>
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: dom?.color ?? "var(--border)" }} />
-                      <span className="min-w-0 flex-1 truncate">{p.number ? `${p.number}. ` : ""}{p.title}</span>
-                    </button>
-                  );
-                })}
+                {g.items.map((p) => (
+                  <button key={p.id} onClick={() => setSelected(p.id)}
+                    className={cn("flex w-full items-center gap-2 rounded-md py-1.5 pl-5 pr-2 text-left text-sm transition-colors",
+                      selected === p.id ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted")}>
+                    <span className="min-w-0 flex-1 truncate">{p.number ? `${p.number}. ` : ""}{p.title}</span>
+                    {p.sequence_id && seqById.has(p.sequence_id) && <Layers size={11} className="shrink-0 text-muted-foreground/70" />}
+                    <RatingDot value={p.rating} />
+                  </button>
+                ))}
               </div>
             ))}
           </div>
@@ -222,7 +237,7 @@ function PrepEditor({ prep, sequences, onSaved, onDuplicate, onDelete, onOpenSeq
             <div className={label}>Séquence</div>
             <Select value={p.sequence_id ?? ""} onChange={(e) => {
               const sq = sequences.find((s) => s.id === e.target.value);
-              set({ sequence_id: e.target.value || null, domain_id: sq?.domain_id ?? p.domain_id });
+              set({ sequence_id: e.target.value || null, domain_id: sq?.domain_id ?? p.domain_id, subject_id: sq?.subject_id ?? p.subject_id });
             }} className="h-8 text-xs">
               <option value="">Aucune</option>
               {sequences.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
@@ -232,10 +247,13 @@ function PrepEditor({ prep, sequences, onSaved, onDuplicate, onDelete, onOpenSeq
           <div className="space-y-1 border-r border-border p-3">
             <div className={cn(label, "text-center")}>Nom de la séance</div>
             <Input value={p.title} onChange={(e) => set({ title: e.target.value })} className="h-9 text-center text-base font-medium" aria-label="Nom de la séance" />
-            <Select value={p.domain_id ?? ""} onChange={(e) => set({ domain_id: e.target.value || null })} className="h-7 text-xs">
-              <option value="">Sans domaine</option>
-              {domains.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </Select>
+            <div className="grid grid-cols-2 gap-1.5">
+              <Select value={p.domain_id ?? ""} onChange={(e) => set({ domain_id: e.target.value || null, subject_id: null })} className="h-7 text-xs">
+                <option value="">Sans domaine</option>
+                {domains.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </Select>
+              <SubjectSelect domainId={p.domain_id} value={p.subject_id} onChange={(subject_id) => set({ subject_id })} />
+            </div>
           </div>
           <div className="space-y-2 p-3 text-xs">
             <label className="flex items-center gap-2">
@@ -284,6 +302,10 @@ function PrepEditor({ prep, sequences, onSaved, onDuplicate, onDelete, onOpenSeq
           <Plus size={13} /> Ajouter une phase
         </button>
 
+        <div className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-2">
+          <span className="text-xs font-semibold text-foreground">Bilan coloré :</span>
+          <RatingPicker value={p.rating} onChange={(rating) => set({ rating })} />
+        </div>
         <div className="bg-muted/30"><Block title="Bilan de la séance" bare><AutoTextarea value={p.review} onChange={(v) => set({ review: v })} minRows={4} className={cell} label="Bilan" /></Block></div>
       </div>
 

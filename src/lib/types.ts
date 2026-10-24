@@ -40,6 +40,8 @@ export interface JournalEntry {
   done: number;
   /** Linked fiche de préparation. */
   prep_id: string | null;
+  /** Bilan coloré : 0 = non noté, 1 = vert (à réutiliser), 2 = jaune (à modifier), 3 = rouge (à revoir). */
+  rating: number;
 }
 
 /** A séance as shown in the cahier journal: the timetable slot merged with
@@ -63,6 +65,7 @@ export interface DaySession {
   /** 0 = visible, 1 = masquée, 2 = supprimée de ce jour. */
   hidden: number;
   prepId: string | null;
+  rating: number;
   /** 0 = pas encore validée, 1 = faite, 2 = non faite. */
   done: number;
 }
@@ -76,7 +79,7 @@ export interface WeekSettings {
 }
 
 export type EntryFields = Partial<
-  Pick<JournalEntry, "title" | "start_min" | "end_min" | "domain_id" | "objectives" | "progression" | "materials" | "review" | "hidden" | "done" | "prep_id">
+  Pick<JournalEntry, "title" | "start_min" | "end_min" | "domain_id" | "objectives" | "progression" | "materials" | "review" | "hidden" | "done" | "prep_id" | "rating">
 >;
 
 export type EventKind = "meeting" | "holiday" | "event" | "other";
@@ -133,6 +136,10 @@ export interface PrepPhase {
 export interface Prep {
   id: string;
   sequence_id: string | null;
+  /** Dossier (sous-domaine), e.g. Grammaire in Français. */
+  subject_id: string | null;
+  /** Last colour rating given in the cahier journal (see JournalEntry.rating). */
+  rating: number;
   domain_id: string | null;
   title: string;
   /** Séance n (in its séquence). */
@@ -151,6 +158,7 @@ export interface Prep {
 export interface Sequence {
   id: string;
   domain_id: string | null;
+  subject_id: string | null;
   title: string;
   levels: string;
   nb_sessions: number | null;
@@ -160,6 +168,14 @@ export interface Sequence {
   /** Période 1–5 of the programmation (null = non planifiée). */
   period: number | null;
   updated_at: string;
+}
+
+/** A dossier inside a domain (Français › Grammaire). */
+export interface Subject {
+  id: string;
+  domain_id: string;
+  name: string;
+  position: number;
 }
 
 export type AttachmentOwner = "entry" | "prep" | "sequence";

@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "sql:default",
@@ -23,6 +25,14 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-internal-toggle-maximize",
     "core:window:allow-start-dragging",
-    "core:window:allow-close"
+    "core:window:allow-close",
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "https://data.education.gouv.fr/*"
+        }
+      ]
+    }
   ]
 }

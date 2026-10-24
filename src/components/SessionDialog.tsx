@@ -30,7 +30,7 @@ interface Props {
 const QUICK_DURATIONS = [30, 45, 60, 90];
 
 export default function SessionDialog({ heading, initial, dayPicker, onSave, onDelete, deleteLabel, onClose }: Props) {
-  const { domains, domainById, slots, week } = useVault();
+  const { domains, domainById, slots, subjects, week } = useVault();
   const [title, setTitle] = useState(initial.title);
   const [domainId, setDomainId] = useState<string | null>(initial.domain_id);
   const [start, setStart] = useState(fmtTime(initial.start_min));
@@ -42,7 +42,11 @@ export default function SessionDialog({ heading, initial, dayPicker, onSave, onD
   const endMin = parseTime(end);
   const valid = startMin !== null && endMin !== null && endMin > startMin && (!dayPicker || days.length > 0);
   const domain = domainId ? domainById.get(domainId) : undefined;
-  const suggestions = useMemo(() => suggestionsFor(domain, slots), [domain, slots]);
+  // Dossiers of the domain first (Grammaire, Conjugaison…), then usual names.
+  const suggestions = useMemo(
+    () => [...new Set([...subjects.filter((x) => x.domain_id === domain?.id).map((x) => x.name), ...suggestionsFor(domain, slots)])],
+    [domain, slots, subjects]
+  );
   const pickableDays = [...new Set([...week.days, ...initial.days])].sort();
 
   function toggleDay(d: number) {
@@ -133,7 +137,7 @@ export default function SessionDialog({ heading, initial, dayPicker, onSave, onD
           </datalist>
           {suggestions.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {suggestions.slice(0, 8).map((s) => (
+              {suggestions.slice(0, 12).map((s) => (
                 <button
                   key={s}
                   type="button"

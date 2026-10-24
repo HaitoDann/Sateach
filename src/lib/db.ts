@@ -2,10 +2,10 @@ import { generateId } from "./utils";
 import { openSqlJsDriver, openTauriDriver, type SqlDriver } from "./sql";
 import { isTauri } from "./platform";
 import { acquireLock, releaseLock } from "./vault";
-import { DEFAULT_DOMAINS } from "./domains";
+import { DEFAULT_DOMAINS, DEFAULT_SUBJECTS } from "./domains";
 import { mergeDay, slotEntryId } from "./journal";
 import { fromDateKey, weekdayIndex } from "./time";
-import type { Attachment, AttachmentOwner, Prep, PrepPhase, Sequence, YearSettings, ArchiveFile, ArchiveItem, CalendarEvent, DaySession, Domain, EntryFields, JournalEntry, Slot, WeekSettings } from "./types";
+import type { Subject, Attachment, AttachmentOwner, Prep, PrepPhase, Sequence, YearSettings, ArchiveFile, ArchiveItem, CalendarEvent, DaySession, Domain, EntryFields, JournalEntry, Slot, WeekSettings } from "./types";
 
 // ─── Connection ───────────────────────────────────────────────────────────────
 // The vault is a folder; its data lives in `<vault>/sateach.db` (SQLite).
@@ -84,7 +84,7 @@ export async function checkpointWal(): Promise<void> {
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
-const LATEST_SCHEMA_VERSION = 3;
+const LATEST_SCHEMA_VERSION = 4;
 
 async function migrate(d: SqlDriver): Promise<void> {
   const rows = await d.select<{ user_version: number }>("PRAGMA user_version");
@@ -270,6 +270,52 @@ async function migrate(d: SqlDriver): Promise<void> {
     );
   }
 
+  if (version < 4) {
+    for (const sql of [
+      "ALTER TABLE journal_entries ADD COLUMN rating INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE preps ADD COLUMN subject_id TEXT",
+      "ALTER TABLE preps ADD COLUMN rating INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE sequences ADD COLUMN subject_id TEXT",
+    ]) {
+      try { await d.execute(sql); } catch { /* already there */ }
+    }
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS subjects (
+        id TEXT PRIMARY KEY,
+        domain_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0
+      )`);
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS programming_weeks (
+        subject_id TEXT NOT NULL,
+        period INTEGER NOT NULL,
+        week INTEGER NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (subject_id, period, week)
+      )`);
+
+    // « Rituels » becomes a domain of its own (rituels du matin…).
+    const doms = await d.select<{ id: string; name: string }>("SELECT id, name FROM domains");
+    if (!doms.some((x) => x.name.trim().toLowerCase() === "rituels")) {
+      const pos = await d.select<{ p: number | null }>("SELECT MAX(position) AS p FROM domains");
+      await d.execute(
+        "INSERT INTO domains (id, name, color, position, target_minutes) VALUES (?, 'Rituels', '#64748b', ?, 0)",
+        [generateId(), Number(pos[0]?.p ?? -1) + 1]
+      );
+    }
+    // Default dossiers for Français and Mathématiques.
+    const nSub = await d.select<{ n: number }>("SELECT COUNT(*) AS n FROM subjects");
+    if (Number(nSub[0]?.n ?? 0) === 0) {
+      for (const dom of doms) {
+        const names = DEFAULT_SUBJECTS[dom.name.trim().toLowerCase()] ?? [];
+        for (const [i, name] of names.entries()) {
+          await d.execute("INSERT INTO subjects (id, domain_id, name, position) VALUES (?, ?, ?, ?)", [generateId(), dom.id, name, i]);
+        }
+      }
+    }
+  }
+
   if (version < LATEST_SCHEMA_VERSION) {
     await d.execute(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
   }
@@ -395,7 +441,7 @@ export async function saveWeekSettings(w: WeekSettings): Promise<void> {
 
 function toEntry(r: JournalEntry): JournalEntry {
   const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
-  return { ...r, start_min: n(r.start_min), end_min: n(r.end_min), hidden: Number(r.hidden), done: Number(r.done) };
+  return { ...r, start_min: n(r.start_min), end_min: n(r.end_min), hidden: Number(r.hidden), done: Number(r.done), rating: Number(r.rating ?? 0) };
 }
 
 export async function getJournalEntries(date: string): Promise<JournalEntry[]> {
@@ -413,7 +459,7 @@ export async function getJournalDay(date: string, slots: Slot[]): Promise<{ sess
 }
 
 const ENTRY_FIELDS: (keyof EntryFields)[] = [
-  "title", "start_min", "end_min", "domain_id", "objectives", "progression", "materials", "review", "hidden", "done", "prep_id",
+  "title", "start_min", "end_min", "domain_id", "objectives", "progression", "materials", "review", "hidden", "done", "prep_id", "rating",
 ];
 
 /** Write some fields of a séance for one day, creating its journal row on the
@@ -553,10 +599,10 @@ export async function restoreEntryRow(id: string, row: JournalEntry | null): Pro
   await conn().execute("DELETE FROM journal_entries WHERE id = ?", [id]);
   if (!row) return;
   await conn().execute(
-    `INSERT INTO journal_entries (id, date, slot_id, title, start_min, end_min, domain_id, objectives, progression, materials, review, hidden, done, prep_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO journal_entries (id, date, slot_id, title, start_min, end_min, domain_id, objectives, progression, materials, review, hidden, done, prep_id, rating)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [row.id, row.date, row.slot_id, row.title, row.start_min, row.end_min, row.domain_id, row.objectives, row.progression,
-     row.materials, row.review, row.hidden, row.done, row.prep_id ?? null]
+     row.materials, row.review, row.hidden, row.done, row.prep_id ?? null, row.rating ?? 0]
   );
 }
 
@@ -588,7 +634,7 @@ function toPrep(r: Omit<Prep, "phases"> & { phases: string }): Prep {
   let phases: PrepPhase[] = [];
   try { phases = JSON.parse(r.phases) as PrepPhase[]; } catch { /* keep empty */ }
   const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
-  return { ...r, number: n(r.number), duration_min: n(r.duration_min), phases: Array.isArray(phases) ? phases : [] };
+  return { ...r, number: n(r.number), duration_min: n(r.duration_min), rating: Number(r.rating ?? 0), subject_id: r.subject_id ?? null, phases: Array.isArray(phases) ? phases : [] };
 }
 
 export async function getPreps(): Promise<Prep[]> {
@@ -603,19 +649,20 @@ export async function getPrep(id: string): Promise<Prep | null> {
   return rows[0] ? toPrep(rows[0]) : null;
 }
 
-export type PrepInput = Omit<Prep, "id" | "updated_at"> & { id?: string };
+export type PrepInput = Omit<Prep, "id" | "updated_at" | "subject_id" | "rating"> & { id?: string; subject_id?: string | null; rating?: number };
 
 export async function savePrep(p: PrepInput): Promise<string> {
   const id = p.id ?? generateId();
   await conn().execute(
-    `INSERT INTO preps (id, sequence_id, domain_id, title, number, duration_min, objective, skills, materials, organisation, phases, review)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO preps (id, sequence_id, domain_id, title, number, duration_min, objective, skills, materials, organisation, phases, review, subject_id, rating)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET sequence_id = excluded.sequence_id, domain_id = excluded.domain_id, title = excluded.title,
+       subject_id = excluded.subject_id, rating = excluded.rating,
        number = excluded.number, duration_min = excluded.duration_min, objective = excluded.objective, skills = excluded.skills,
        materials = excluded.materials, organisation = excluded.organisation, phases = excluded.phases, review = excluded.review,
        updated_at = datetime('now')`,
     [id, p.sequence_id, p.domain_id, p.title, p.number, p.duration_min, p.objective, p.skills, p.materials, p.organisation,
-     JSON.stringify(p.phases), p.review]
+     JSON.stringify(p.phases), p.review, p.subject_id ?? null, p.rating ?? 0]
   );
   return id;
 }
@@ -632,20 +679,21 @@ export async function deletePrep(id: string): Promise<Attachment[]> {
 export async function getSequences(): Promise<Sequence[]> {
   const rows = await conn().select<Sequence>("SELECT * FROM sequences ORDER BY COALESCE(period, 99), title COLLATE NOCASE");
   const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
-  return rows.map((r) => ({ ...r, nb_sessions: n(r.nb_sessions), period: n(r.period) }));
+  return rows.map((r) => ({ ...r, nb_sessions: n(r.nb_sessions), period: n(r.period), subject_id: r.subject_id ?? null }));
 }
 
-export type SequenceInput = Omit<Sequence, "id" | "updated_at"> & { id?: string };
+export type SequenceInput = Omit<Sequence, "id" | "updated_at" | "subject_id"> & { id?: string; subject_id?: string | null };
 
 export async function saveSequence(q: SequenceInput): Promise<string> {
   const id = q.id ?? generateId();
   await conn().execute(
-    `INSERT INTO sequences (id, domain_id, title, levels, nb_sessions, general_objectives, end_of_cycle, review, period)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO sequences (id, domain_id, title, levels, nb_sessions, general_objectives, end_of_cycle, review, period, subject_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET domain_id = excluded.domain_id, title = excluded.title, levels = excluded.levels,
+       subject_id = excluded.subject_id,
        nb_sessions = excluded.nb_sessions, general_objectives = excluded.general_objectives, end_of_cycle = excluded.end_of_cycle,
        review = excluded.review, period = excluded.period, updated_at = datetime('now')`,
-    [id, q.domain_id, q.title, q.levels, q.nb_sessions, q.general_objectives, q.end_of_cycle, q.review, q.period]
+    [id, q.domain_id, q.title, q.levels, q.nb_sessions, q.general_objectives, q.end_of_cycle, q.review, q.period, q.subject_id ?? null]
   );
   return id;
 }
@@ -730,4 +778,58 @@ export async function getPrepUsages(prepId: string): Promise<{ id: string; date:
 
 export async function relinkPrep(prepId: string, entryIds: string[]): Promise<void> {
   for (const id of entryIds) await conn().execute("UPDATE journal_entries SET prep_id = ? WHERE id = ?", [prepId, id]);
+}
+
+// ─── Dossiers (sous-domaines) ─────────────────────────────────────────────────
+
+export async function getSubjects(): Promise<Subject[]> {
+  const rows = await conn().select<Subject>("SELECT * FROM subjects ORDER BY position, name COLLATE NOCASE");
+  return rows.map((r) => ({ ...r, position: Number(r.position) }));
+}
+
+export async function createSubject(domainId: string, name: string): Promise<string> {
+  const id = generateId();
+  const rows = await conn().select<{ p: number | null }>("SELECT MAX(position) AS p FROM subjects WHERE domain_id = ?", [domainId]);
+  await conn().execute("INSERT INTO subjects (id, domain_id, name, position) VALUES (?, ?, ?, ?)", [id, domainId, name, Number(rows[0]?.p ?? -1) + 1]);
+  return id;
+}
+
+export async function renameSubject(id: string, name: string): Promise<void> {
+  await conn().execute("UPDATE subjects SET name = ? WHERE id = ?", [name, id]);
+}
+
+/** Deleting a dossier keeps its fiches and séquences (they leave the dossier). */
+export async function deleteSubject(id: string): Promise<void> {
+  await conn().execute("UPDATE preps SET subject_id = NULL WHERE subject_id = ?", [id]);
+  await conn().execute("UPDATE sequences SET subject_id = NULL WHERE subject_id = ?", [id]);
+  await conn().execute("DELETE FROM programming_weeks WHERE subject_id = ?", [id]);
+  await conn().execute("DELETE FROM subjects WHERE id = ?", [id]);
+}
+
+export async function moveSubject(id: string, position: number): Promise<void> {
+  await conn().execute("UPDATE subjects SET position = ? WHERE id = ?", [position, id]);
+}
+
+/** Colour rating of a séance in the cahier journal; also remembered on its fiche. */
+export async function rateSession(date: string, s: Pick<DaySession, "entryId" | "slotId" | "prepId">, rating: number): Promise<void> {
+  await saveSessionFields(date, s, { rating });
+  if (s.prepId) await conn().execute("UPDATE preps SET rating = ? WHERE id = ?", [rating, s.prepId]);
+}
+
+// ─── Programmation par semaine ────────────────────────────────────────────────
+
+/** Contents of one période: key `${subjectId}:${week}`. */
+export async function getProgrammingWeeks(period: number): Promise<Map<string, string>> {
+  const rows = await conn().select<{ subject_id: string; week: number; content: string }>(
+    "SELECT subject_id, week, content FROM programming_weeks WHERE period = ?", [period]
+  );
+  return new Map(rows.map((r) => [`${r.subject_id}:${Number(r.week)}`, r.content]));
+}
+
+export async function saveProgrammingWeek(subjectId: string, period: number, week: number, content: string): Promise<void> {
+  await conn().execute(
+    `INSERT INTO programming_weeks (subject_id, period, week, content) VALUES (?, ?, ?, ?)
+     ON CONFLICT(subject_id, period, week) DO UPDATE SET content = excluded.content`,
+    [subjectId, period, week, content]
+  );
 }

@@ -32,9 +32,12 @@ sur la même base que Nilo : même ergonomie, mêmes composants, même système 
 - **Séquences** — fiche de séquence (niveaux, nombre de séances, objectifs
   généraux, attendus de fin de cycle, période, bilan) avec le tableau de ses
   séances ; chaque ligne ouvre sa fiche de préparation.
-- **Programmation** — zone A/B/C, rentrée, vacances → les 5 périodes et leur
-  nombre de semaines ; pour chaque domaine et période, les notions abordées et
-  les séquences prévues. Les vacances s'ajoutent au calendrier en un clic.
+- **Programmation** — une période à la fois : pour chaque domaine, chaque
+  dossier (Grammaire, Conjugaison…) a son tableau S1, S2… (dates affichées).
+  Le calendrier scolaire officiel (zone A/B/C) se charge automatiquement et
+  donne les 5 périodes ; les vacances s'ajoutent au calendrier en un clic.
+- **Dossiers** — chaque domaine a ses dossiers (Français › Grammaire…), qui
+  rangent les fiches de préparation et les séquences.
 - **Domaines** — Français, Mathématiques, Questionner le monde, EPS, Arts
   plastiques, Musique, EMC, Anglais, chacun avec sa couleur. Nom et couleur
   modifiables, domaines ajoutables dans les Réglages.
@@ -51,6 +54,8 @@ sur la même base que Nilo : même ergonomie, mêmes composants, même système 
   Chaque séance se valide « Faite » ou « Non faite », se copie vers d'autres
   jours (glisser sur la semaine), se masque (réaffichable) ou se supprime avec
   confirmation. « Retour arrière » / Ctrl+Z annule la dernière action.
+  Vue Semaine, clic droit › Copier / Coller, poignée « façon Excel » pour
+  répéter une séance sur plusieurs jours, bilan coloré vert / jaune / rouge.
 
 ## Le vault
 

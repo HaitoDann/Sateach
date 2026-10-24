@@ -65,3 +65,27 @@ export function holidayOn(y: YearSettings | null, date: string): Holiday | undef
 export function periodOn(periods: Period[], date: string): Period | undefined {
   return periods.find((p) => p.start <= date && date <= p.end);
 }
+
+export interface SchoolWeek {
+  n: number;
+  /** First and last school day of the week inside the période. */
+  start: string;
+  end: string;
+}
+
+/** The weeks S1, S2… of a période (Monday-based, clipped to the période). */
+export function periodWeeks(p: Period): SchoolWeek[] {
+  if (!p.start || !p.end) return [];
+  const out: SchoolWeek[] = [];
+  let d = fromDateKey(p.start);
+  while (toDateKey(d) <= p.end) {
+    const wd = (d.getDay() + 6) % 7;
+    const monday = addDays(d, -wd);
+    const friday = addDays(monday, 4);
+    const start = toDateKey(d);
+    const endKey = toDateKey(friday) < p.end ? toDateKey(friday) : p.end;
+    if (wd < 5) out.push({ n: out.length + 1, start, end: endKey });
+    d = addDays(monday, 7);
+  }
+  return out;
+}

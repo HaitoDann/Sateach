@@ -39,6 +39,7 @@ export function mergeDay(date: string, weekday: number, slots: Slot[], entries: 
       review: e?.review ?? "",
       hidden: Number(e?.hidden ?? 0),
       prepId: e?.prep_id ?? null,
+      rating: Number(e?.rating ?? 0),
       done: Number(e?.done ?? 0),
     });
   }
@@ -65,6 +66,7 @@ export function mergeDay(date: string, weekday: number, slots: Slot[], entries: 
       review: e.review,
       hidden: Number(e.hidden),
       prepId: e.prep_id ?? null,
+      rating: Number(e.rating ?? 0),
       done: Number(e.done),
     });
   }
