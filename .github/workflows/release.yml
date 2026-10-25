@@ -9,7 +9,10 @@ name: Release
 # version (tauri.conf.json, Cargo.toml, package.json) and add a section on top
 # of CHANGELOG.md — its text is shown in the update card.
 #
-# Required secrets (Settings › Secrets and variables › Actions):
+# Without the secrets below, a fallback still builds the installer (without
+# auto-update) and publishes it as a release of THIS repository.
+#
+# Secrets for the full mode (Settings › Secrets and variables › Actions):
 #   TAURI_SIGNING_PRIVATE_KEY           same value as in the Nilo repo
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  same value as in the Nilo repo
 #   RELEASES_TOKEN                      token allowed to write to Sateach-releases
@@ -21,7 +24,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: release
@@ -35,22 +38,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Version and existing release
+      - name: Version, mode and existing release
         id: ver
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          OWN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if (-not $env:GH_TOKEN) { Write-Error "RELEASES_TOKEN secret is not set"; exit 1 }
           $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           "VERSION=$version" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "TAG=v$version"    | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          gh release view "v$version" --repo $env:RELEASES_REPO *> $null
+          if ($env:RELEASES_TOKEN -and $env:SIGNING_KEY) {
+            $mode = "signed"; $env:GH_TOKEN = $env:RELEASES_TOKEN; $repo = $env:RELEASES_REPO
+          } else {
+            echo "::warning::Secrets missing — building the installer WITHOUT auto-update, released in ${{ github.repository }}."
+            $mode = "unsigned"; $env:GH_TOKEN = $env:OWN_TOKEN; $repo = "${{ github.repository }}"
+          }
+          "mode=$mode" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          gh release view "v$version" --repo $repo *> $null
           if ($LASTEXITCODE -eq 0) {
-            echo "v$version is already published — nothing to do (bump the version to release)."
+            echo "v$version is already published in $repo — nothing to do (bump the version to release)."
             "skip=true" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
           } else {
-            echo "Releasing v$version"
+            echo "Releasing v$version ($mode) in $repo"
             "skip=false" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
           exit 0
@@ -79,7 +90,7 @@ jobs:
         run: npm ci
 
       - name: Build (signed)
-        if: steps.ver.outputs.skip == 'false'
+        if: steps.ver.outputs.skip == 'false' && steps.ver.outputs.mode == 'signed'
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY_B64: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -92,7 +103,7 @@ jobs:
           npm run tauri build
 
       - name: Create latest.json
-        if: steps.ver.outputs.skip == 'false'
+        if: steps.ver.outputs.skip == 'false' && steps.ver.outputs.mode == 'signed'
         shell: pwsh
         run: |
           $v = $env:VERSION
@@ -124,7 +135,7 @@ jobs:
           Get-Content src-tauri/target/release/bundle/latest.json
 
       - name: Publish release
-        if: steps.ver.outputs.skip == 'false'
+        if: steps.ver.outputs.skip == 'false' && steps.ver.outputs.mode == 'signed'
         uses: softprops/action-gh-release@v2
         with:
           repository: ${{ env.RELEASES_REPO }}
@@ -142,3 +153,24 @@ jobs:
             src-tauri/target/release/bundle/nsis/Sateach_*_x64-setup.nsis.zip
             src-tauri/target/release/bundle/nsis/Sateach_*_x64-setup.nsis.zip.sig
             src-tauri/target/release/bundle/latest.json
+
+      # ── Fallback: no secrets → plain installer in this repository ───────────
+      - name: Build (unsigned, no auto-update)
+        if: steps.ver.outputs.skip == 'false' && steps.ver.outputs.mode == 'unsigned'
+        shell: pwsh
+        run: |
+          '{ "bundle": { "createUpdaterArtifacts": false } }' | Set-Content nosign.json -Encoding utf8
+          npx tauri build --config nosign.json
+
+      - name: Publish release (this repository)
+        if: steps.ver.outputs.skip == 'false' && steps.ver.outputs.mode == 'unsigned'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: "Sat'each ${{ env.TAG }}"
+          target_commitish: ${{ github.sha }}
+          body: |
+            **Installation** : téléchargez `Sateach_${{ env.VERSION }}_x64-setup.exe` et lancez-le. Si Windows affiche « Windows a protégé votre ordinateur » : *Informations complémentaires* → *Exécuter quand même*.
+            Les données existantes (vault) sont conservées.
+          files: |
+            src-tauri/target/release/bundle/nsis/Sateach_*_x64-setup.exe
